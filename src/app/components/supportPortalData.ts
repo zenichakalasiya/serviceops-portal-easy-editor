@@ -1,0 +1,1674 @@
+/* Support Portal — Admin › Support Channels.
+ *
+ * Two data sets live here and nothing else does:
+ *   1. the PAGES an admin has built (the listing's rows, created by the builder), and
+ *   2. the TEMPLATES the "Use Template" gallery offers.
+ *
+ * The portal CONTENT below (requests, approvals, knowledge) is what the builder canvas renders as
+ * the default layout. It is the requester's real dashboard, so the numbers in a card's header and
+ * the rows beneath it are read from the SAME array — a count and its list can never disagree.
+ */
+
+export type PortalPageStatus = 'Published' | 'Draft';
+
+export interface PortalPage {
+  id: string;
+  name: string;
+  /** System pages ship with the product; Custom ones are built here. */
+  type: 'System' | 'Custom';
+  status: PortalPageStatus;
+  /** 'Blank layout' for a from-scratch page, otherwise the template it was started from. */
+  source: string;
+  audience: string;
+  modifiedAt: string;
+  modifiedBy: string;
+  /** Edited since it was last published — the amber chip on the listing. */
+  dirty?: boolean;
+  /* ⚠️ How the page was STARTED, not merely which template it resembles. `source` is prose for the
+     listing; this is the fact the builder acts on — a blank portal must not seed the default page's
+     banner, cards and widgets, and nothing else can tell it apart. */
+  start?: 'blank' | 'template';
+  /* Step 1 of Create Support Portal. Held on the record because they are facts about the PORTAL,
+     not about its layout — the Branding panel shows the same values once it is open. */
+  company?: string;
+  url?: string;
+  idp?: string;
+  ssoOnly?: boolean;
+  /* Which LAYOUT this portal opens on.
+   *
+   * ⚠️ A portal's arrangement used to be global constants, so every record in this listing opened
+   * the identical page — two portals could differ by name and address and by nothing you could see.
+   * The seed lives on the record now, which is the smallest thing that makes two portals genuinely
+   * two portals. Edits inside a session still behave exactly as they did.
+   *
+   *   v2  the live product's page — no Most Used Services row, a right-hand rail beside the work
+   *       cards, and My Assets / My CIs as full-width rows of tiles
+   *   v1  the arrangement this builder shipped with, kept intact on "Support Portal - 2" */
+  layout?: 'v1' | 'v2';
+}
+
+/* ⚠️ `portal` is not a template layout like the others — it is a PICTURE OF THIS PORTAL. The
+   Default tile used to borrow `classic`, a generic three-column wireframe, so the one tile that
+   promises "the page your requesters see today" was showing a page nobody has. It draws the real
+   thing: banner and search, the four action cards straddling its lower edge, the two service rows,
+   and the work cards below them. */
+export type TemplateLayout = 'portal' | 'classic' | 'spotlight' | 'catalog' | 'knowledge' | 'minimal' | 'status' | 'verdant' | 'counter' | 'deskrail';
+
+/* The industries a template is BUILT FOR.
+ *
+ * ⚠️ A SECOND axis beside `category`, never a replacement. Category is department scope — whose
+ * desk this portal is, IT or HR or Facilities — and industry is whose BUSINESS it is. A hospital's
+ * IT desk is both, so a template that could only carry one of them would have to drop the half the
+ * admin was searching on.
+ * ⚠️ SIX, and the list is closed. They are the verticals the portal programme is being designed
+ * against, so a seventh is a decision about the programme rather than a line of data — and an open
+ * list is how two templates end up tagged "Health" and "Healthcare" and neither finds the other.
+ * ⚠️ ORDER MATTERS: it is the order the chips are shown in, so a template's first two tags are the
+ * two an admin reads on the card. Broadest first. */
+/* ⚠️ `short` is what a CHIP says; `name` is what the industry is called everywhere else. Only one
+   needs it: "Healthcare & Pharma" is 123px of an 83px share of a 383px card, so on a card it is the
+   difference between a row that fits on one line and a template name truncated to make room for an
+   ampersand. The full name is still on the chip's own hover. */
+export const PORTAL_INDUSTRIES = [
+  { id: 'it', name: 'IT / ITES' },
+  { id: 'healthcare', name: 'Healthcare & Pharma', short: 'Healthcare' },
+  { id: 'manufacturing', name: 'Manufacturing' },
+  { id: 'government', name: 'Government' },
+  { id: 'education', name: 'Education' },
+  { id: 'bfsi', name: 'BFSI' },
+] as const;
+
+export type PortalIndustry = typeof PORTAL_INDUSTRIES[number]['id'];
+
+/** ⚠️ Falls back to the id, so an unknown one shows SOMETHING rather than an empty chip. */
+export const industryName = (id: string): string =>
+  (PORTAL_INDUSTRIES as readonly { id: string; name: string }[]).find((i) => i.id === id)?.name ?? id;
+
+/** The chip form — the short label where there is one, the name where there is not. */
+export const industryChip = (id: string): string => {
+  const i = (PORTAL_INDUSTRIES as readonly { id: string; name: string; short?: string }[]).find((x) => x.id === id);
+  return i?.short ?? i?.name ?? id;
+};
+
+/** A template's industries in `PORTAL_INDUSTRIES` order, whatever order they were written in. */
+export const industriesOf = (t: { industries?: readonly string[] }): string[] =>
+  PORTAL_INDUSTRIES.filter((i) => (t.industries ?? []).includes(i.id)).map((i) => i.id);
+
+export interface PortalTemplate {
+  id: string;
+  name: string;
+  desc: string;
+  category: 'IT Support' | 'HR' | 'Facilities' | 'General';
+  /* Which businesses this layout was built for — up to six, shown two-at-a-time on its card.
+     ⚠️ Optional: the Default tile has none, and that is not an omission. It is the portal that
+     already exists rather than a layout chosen for a trade, so an industry tag on it would be
+     claiming something nobody decided. */
+  industries?: readonly PortalIndustry[];
+  layout: TemplateLayout;
+  /** Tints the hero of the page this template produces, so picking one is visibly a choice. */
+  accent: string;
+  badge?: string;
+  /** What the template drops onto the canvas — read on the gallery's detail rail. */
+  blocks: string[];
+  /* ⚠️ The page this template actually PRODUCES — and it is DATA, not a renderer.
+     The page is already config all the way down: band order, row order, column counts, the hero's
+     height, colour, alignment and search width, per-node styles and the theme. A template is a
+     bundle of those values, which is the same rule `BLOCK_ORDER_V2` states as "Seeds, not a second
+     renderer": a layout with its own rendering path is a second page to maintain, and the two drift
+     the first time a widget changes.
+     ⚠️ A template with no `seed` still works — the gallery lists it and the page opens on the
+     default arrangement. It just has nothing of its own to say yet. */
+  seed?: TemplateSeed;
+  /* ⚠️ Withheld from the gallery, NOT deleted — the same rule `PortalElement.hidden` follows.
+     A template with no `seed` produces the default arrangement under a different name and a
+     recoloured thumbnail, which is a promise the gallery cannot keep: six tiles that all open the
+     same page. They stay in the file with their names, categories, accents and block lists intact,
+     and each one comes back the moment it has a design behind it — one word per template.
+     ⚠️ The DEFAULT tile is not in this list. It is the portal that already exists, rendered from
+     the live page, so nothing here can hide it. */
+  hidden?: boolean;
+}
+
+export interface TemplateSeed {
+  /** Bands, top to bottom. Anything absent is not on the page — and stays addable from the palette. */
+  blockOrder?: string[];
+  rowOrder?: Record<string, string[]>;
+  /** Per-node config: the hero's own settings, each band's column count. */
+  cfg?: Record<string, Record<string, unknown>>;
+  /** The right-hand rail, where the layout has one. */
+  rail?: string[];
+  /* ⚠️ Per-node STYLE, for the handful of values that do not live in config. Columns is the one
+     that forced this: §7.8 puts it in the style store on purpose, because the Content tab and the
+     Arrangement pack are two controls for one value and both write there — so a template setting
+     `columns` in cfg was writing to a key the renderer does not read, and the control looked
+     inert while working perfectly. A template arranges the page; it has to be able to reach every
+     value the page is arranged by.
+     ⚠️ Typed loosely on purpose — `NodeStyle` lives in portalPageModel and importing it here
+     would point the data file at the renderer it is supposed to know nothing about. */
+  styles?: Record<string, Record<string, unknown>>;
+}
+
+/* ── Templates ───────────────────────────────────────────────────────────── */
+
+/** The templates a person may actually pick — everything not withheld by `hidden`.
+ *
+ * ⚠️ Read by the gallery, the create dialog and the "Browse N templates" count. `PORTAL_TEMPLATES`
+ * stays the full list because `accentFor` resolves a page's `source` through it, and a portal
+ * built from a template that has since been withheld must keep its accent rather than losing it. */
+export const VISIBLE_TEMPLATES = (): PortalTemplate[] => PORTAL_TEMPLATES.filter((t) => !t.hidden);
+
+export const PORTAL_TEMPLATES: PortalTemplate[] = [
+  {
+    id: 'tpl-classic',
+    hidden: true, // no design behind it yet — see the note on `hidden`
+    name: 'Classic Service Desk',
+    desc: 'The default ServiceOps portal — hero search, three quick actions, and the requester’s own work below.',
+    category: 'IT Support',
+    layout: 'classic',
+    accent: '#0F172A',
+    badge: 'Most used',
+    blocks: ['Hero search', 'Quick actions', 'My Open Requests', 'Pending Approvals', 'Most Read', 'My Assets', 'My CIs'],
+  },
+  {
+    id: 'tpl-spotlight',
+    name: 'Search Spotlight',
+    desc: 'Puts deflection first: a full-bleed search hero with popular articles surfaced before any form.',
+    category: 'IT Support',
+    /* Search before a form is the pattern for a population that self-serves and a catalogue that is
+       mostly articles — a service desk and a campus. */
+    industries: ['it', 'education'],
+    layout: 'spotlight',
+    accent: '#1E3A8A',
+    blocks: ['Full-bleed search', 'Popular articles', 'Quick actions', 'My Open Requests'],
+    /* ── Search Spotlight ──────────────────────────────────────────────────
+       The question this page asks is "what are you trying to do?", and nothing else until it is
+       answered. Every value below serves that one sentence.
+
+       ⚠️ A FLAT field, not the default gradient. The gradient is the nicer picture and it is
+       exactly the problem: it competes with the search bar sitting on top of it. Flat colour makes
+       the input the only bright object in the first viewport, which is the whole point of the
+       template.
+       ⚠️ Taller band, WIDER and fully-rounded field. At 260px with a 70% input the search reads as
+       a control on a banner; at 340 with a pill it reads as the subject of the page.
+       ⚠️ Most Read Knowledge moves to the FIRST card position, ahead of My Open Requests. That one
+       reorder is the thesis: this portal answers before it files.
+       ⚠️ Favourite Services and Most Used Services come OFF the page — not out of the product. Two
+       browse rows above the fold is the opposite of one question, and both stay in the palette.
+       ⚠️ My Open Requests and Pending Approvals STAY. A portal that only searches is a help centre
+       with a logo on it; the requester's own work is the reason they signed in. */
+    seed: {
+      /* ⚠️ EVERY card the default portal carries, in the structure the default portal uses — the
+         main region beside a tall rail, the four action cards, Favourite Services, and My Assets
+         and My CIs as full-width rows. An earlier pass dropped four of them on the argument that a
+         spotlight page should be short. That is a decision about what a customer's portal contains,
+         and it is not a template's to make: a template arranges and styles what the product ships,
+         and anything it hides has to be a thing the admin turned off.
+         ⚠️ What is left of the "deflection first" idea is the one move that costs nothing: Most Read
+         leads the RAIL instead of sitting second in it. The thesis survives; the content does not
+         get edited to fit it. */
+      blockOrder: ['quick', 'favourites', 'work'],
+      rowOrder: {
+        quick: ['quick-incident', 'quick-service', 'quick-ad', 'quick-knowledge'],
+        /* ⚠️ Most Read leads the RAIL, and it is THIS list that puts it there — not the `rail`
+           array below, which decides membership. The rail renders its members in row order, so a
+           promotion has to happen where the order lives or it silently does nothing. */
+        work: ['requests', 'approvals', 'knowledge', 'news', 'contact'],
+        /* Membership, not placement — the rail shape DRAWS these two inside the work band, and this
+           is still the list that reorders them. See the note on ROW_ORDER_V2. */
+        records: ['assets', 'cis'],
+      },
+      rail: ['knowledge', 'news', 'contact'],
+      cfg: {
+        hero: {
+          heading: 'What do you need help with?',
+          sub: 'Search the knowledge base, or start a request below.',
+          searchPlaceholder: 'Describe your issue — “VPN not connecting”',
+          /* ⚠️ SHORTER than the default 260, not taller. The first pass made it 340 and centred the
+             text in it, which put a third of the first viewport into empty colour — the banner was
+             the biggest thing on a page whose subject is a text field. It is a backdrop now. */
+          height: 210,
+          bgKind: 'color',
+          /* Deepened by the gradient into #0B1B3F, with a soft highlight off the top-left. A large
+             flat rectangle of one colour reads as printed; the falloff is what gives it a light
+             source and keeps the white field on top of it looking lit rather than pasted. */
+          bannerStyle: 'gradient',
+          bannerColor: '#1E3A8A',
+          headingColor: '#FFFFFF',
+          /* ⚠️ The search LEAVES the banner and lands across its bottom edge. This is the template's
+             real idea: in the default portal the field is furniture inside a picture, and here it is
+             the page's own control resting on one. Wider and pill-shaped, because it is now the
+             largest object above the fold and should look like the thing to use. */
+          searchPlacement: 'floating',
+          searchWidth: 64,
+          searchRadius: 999,
+          contentAlign: 'center',
+        },
+        quick: { cols: '4', hasCards: true },
+        work: { cols: '3' },
+        /* ⚠️ A PAGE-level choice, not a per-card one. One card treatment for everything on the page
+           — see the note in `cardInner`: a difference between two cards reads as a state rather
+           than as a kind. */
+        page: { cardLook: 'spine' },
+      },
+    },
+  },
+  {
+    id: 'tpl-verdant',
+    name: 'Verdant Service Desk',
+    desc: 'A light banner instead of a dark one, actions that stay off it, and the requester’s work in one tabbed panel rather than three cards.',
+    category: 'IT Support',
+    /* A calm, light page that never shouts — which is what a ward, a campus and a branch all need
+       from a portal their own staff read between other jobs. */
+    industries: ['healthcare', 'education', 'bfsi'],
+    layout: 'verdant',
+    /* The tile and the page both read green, but the BANNER is the pale end of it — see
+       `bannerStyle: 'light'`. This value tints the gallery chrome, not the band. */
+    accent: '#1E7A5A',
+    badge: 'New',
+    blocks: ['Light hero', 'Quick actions', 'Most Used Services', 'Announcements', 'Contact us', 'Work tabs', 'My Assets', 'My CIs'],
+    /* ── Verdant Service Desk ──────────────────────────────────────────────
+       Five decisions, and every one of them is about SHAPE rather than hue — which is the line the
+       "Template LOOKS" note in the preview draws between a template and a recolour.
+
+       ⚠️ The banner is LIGHT, so the ink inverts. `bannerStyle: 'light'` is a third value beside
+       flat and gradient rather than a new key: it is still the Colour tab, still one hex, and the
+       falloff simply runs pale instead of deepening to navy. A light band with the default white
+       heading is an invisible heading, so `heroInk: 'dark'` travels with it.
+       ⚠️ The quick actions come OFF the banner's edge. Two objects cannot straddle one edge, and
+       here the hero already owns its own bottom — so the cards get their own band and every
+       breakpoint has one less thing to solve.
+       ⚠️ Announcements and Contact leave the work band and sit beside SERVICES. That is what
+       `railHome` says; the rail's MEMBERSHIP is still the `rail` array, exactly as before.
+       ⚠️ Requests, Approvals and Most Read become one TABBED container. Each panel still mounts the
+       real card node, so all three stay selectable and keep their own widget drawer — the tab strip
+       decides which one is mounted, nothing else changes.
+       ⚠️ Favourite Services is OFF the page, and this is the one content decision here: the service
+       tiles carry a STAR, and a star is the favourites mechanism. Two rows listing the same four
+       services is what it removes. It stays in the palette, like everything else a template drops. */
+    seed: {
+      blockOrder: ['quick', 'services', 'work', 'records'],
+      rowOrder: {
+        quick: ['quick-incident', 'quick-service', 'quick-ad', 'quick-knowledge'],
+        work: ['requests', 'approvals', 'knowledge', 'news', 'contact'],
+        records: ['assets', 'cis'],
+      },
+      rail: ['news', 'contact'],
+      /* ⚠️ Two columns, and it has to be said HERE rather than in `cfg` — see the note on the
+         field. Four service tiles in one row is the default; at two they are wide enough for a
+         long name like "New Employee Onboarding" to stay on one line. */
+      styles: { services: { columns: 2 } },
+      cfg: {
+        hero: {
+          height: 300,
+          bgKind: 'color',
+          bannerStyle: 'light',
+          bannerColor: '#D5E9DE',
+          headingColor: '#0F3327',
+          contentAlign: 'left',
+          contentMaxWidth: 54,
+          searchWidth: 46,
+          searchRadius: 14,
+        },
+        quick: { cols: '4', cardTemplate: 'top' },
+        /* ⚠️ Per CARD, not just on the row. `iconPos: 'left'` is a spec DEFAULT on every action
+           card and it is read before the row's template — so setting this on the row alone left
+           the tile look switched on and invisible. The card's own key is first in that chain. */
+        'quick-incident': { cardTemplate: 'top', contentAlign: 'center' },
+        'quick-service': { cardTemplate: 'top', contentAlign: 'center' },
+        'quick-ad': { cardTemplate: 'top', contentAlign: 'center' },
+        'quick-knowledge': { cardTemplate: 'top', contentAlign: 'center' },
+        services: { cols: '1' },
+        records: { cols: '2' },
+        page: {
+          heroInk: 'dark',
+          quickLook: 'tile',
+          servicesLook: 'panel',
+          railHome: 'services',
+          /* ⚠️ NO `workLook: 'tabs'` here, deliberately. The option exists and works, but three
+             lists behind one strip means two of them are never seen — a requester who has an
+             approval waiting has no reason to look for it. They are three cards.
+             Any template that wants the tabbed container sets the key; this one does not. */
+          helpLook: 'dark',
+          heroArt: 'shapes',
+        },
+      },
+    },
+  },
+  {
+    id: 'tpl-counter',
+    name: 'Action Counter',
+    /* Four doors inside the banner, reachable in one look — the shape that suits a shift worker at a
+       shared terminal as much as an office. */
+    industries: ['manufacturing', 'it', 'government', 'bfsi'],
+    desc: 'Every action lives inside the banner itself as a glass tile, with Report an Incident inverted to solid white — the heading pairs with the search on one line, and the requester’s own work sits beside a stacked side rail below.',
+    category: 'IT Support',
+    layout: 'counter',
+    accent: '#3D8BD0',
+    badge: 'New',
+    blocks: ['Hero search', 'Quick actions (glass tiles)', 'Favourite Services', 'Most Used Services', 'My Open Requests', 'Pending Approvals', 'Announcements', 'Most Read', 'Contact Us', 'My Assets', 'My CIs'],
+    /* ── Action Counter ────────────────────────────────────────────────────
+       Two ideas, matched to the reference this was built from (`Support Portal Layout System.dc.html`,
+       artboard #3c "Counter") card-treatment and banner shape by shape, not by borrowing an existing
+       template LOOK and recolouring it — see `quickLook: 'glass'` and `searchPlacement: 'side'` below,
+       both NEW page-level flags added for this template and left off every other one.
+
+       ⚠️ FLAT banner, not the usual gradient. A flat fill is a colour Quick Actions can borrow
+       exactly (`bg: '#3D8BD0'` on the section below matches `bannerColor` character for character);
+       a gradient reads differently a few hundred pixels down, and the seam this template exists to
+       remove would come back as a visible colour step where the two bands actually meet.
+       ⚠️ Copy is the product's OWN default hero text ("Welcome to Support Portal" + its subtitle) —
+       no `heading`/`sub`/`searchPlaceholder` override here at all, so it falls through to
+       `content.hero.title`/`.subtitle`/`.placeholder` like an untouched page. The reference's own
+       words ("Kestrel Manufacturing · Plant Services", "Shop floor support desk", "Search or scan an
+       asset tag") are a manufacturing mock persona and a barcode-scan flow this product does not have;
+       reusing our own real copy in the reference's POSITION is the whole instruction.
+       ⚠️ Four tiles, not five. The reference shows a fifth ("Track a Request"), but this product's
+       fixed Quick Actions are exactly Incident/Service/AD/Knowledge — there is no real destination
+       to put in a fifth slot, and the generic addable "external link" card was tried and explicitly
+       REMOVED (invented copy, "IT Status Page", that named nothing real).
+       ⚠️ Report an Incident is the only quick-action card left WHITE and the only one on the default
+       `cardTemplate` ('left' — icon-left row, unchanged from every other template): a solid, opaque
+       ROW tile amid three translucent COLUMN ones is what "primary action" looks like without a label
+       saying so. The other three get `cardTemplate: 'stackedLeft'` (icon top, text below, BOTH left-
+       aligned — see the note on `stackedLeft` in SupportPortalPreview.tsx; `'top'` was not reused
+       because it deliberately always centres) plus `fill: 'color'` at 14% white with a 22% white
+       hairline, `sub: ''` (the reference's secondary tiles carry no description line at all — an
+       empty string, not omitting the key, is what skips the line; see the note where it's read) and
+       `styles[id].iconFill: 'transparent'` (removes the icon's badge square, leaving a bare glyph —
+       glass tiles have no icon container, only the icon floating on the colour). NO hover arrow
+       anywhere on this template, primary tile included — `quickLook: 'glass'` never sets the `tile`
+       hover-arrow affordance, which is `tileActions`-only and untouched by this template.
+       ⚠️ Approvals and Assets move into the WORK-RAIL, not the work band's own two-up grid — a
+       genuinely new placement (`rail: ['approvals', 'assets']`), not just a recolour. Requests keeps
+       the whole main region to itself (`'work-main': { cols: 1 }`), so the band reads as one wide
+       card of the requester's own work beside a narrow stack of what else needs them. */
+    seed: {
+      /* ── The page below the banner, in four rows ──
+         browse · work · help · records. Every data card the product ships has a place, which is
+         what the reference artboard could not show: #3c draws four cards and stops, so the other
+         five had to be given a home that reads as part of the same page rather than appended to it. */
+      blockOrder: ['quick', 'favourites', 'services', 'work', 'records'],
+      rowOrder: {
+        quick: ['quick-incident', 'quick-service', 'quick-ad', 'quick-knowledge'],
+        /* Row 2 is the first three at three columns; row 3 is the `rail` pair below them. The
+           ORDER here is what puts Requests first and Announcements third — `rail` only decides
+           which two drop to the second row. */
+        work: ['requests', 'approvals', 'news', 'knowledge', 'contact'],
+        /* ⚠️ BOTH now. My CIs was dropped while Assets lived in the side rail — a single record card
+           in a column has no partner to sit beside, and a rail is not where an inventory belongs.
+           Given their own row they are a pair again, which is the shape they were designed as. */
+        records: ['assets', 'cis'],
+      },
+      /* ⚠️ Membership, and the placement is `railHome: 'below'`. These two are the help row: Most
+         Read takes two shares and Contact Us one, so the reading material leads and the last resort
+         sits beside it rather than under it. */
+      rail: ['knowledge', 'contact'],
+      cfg: {
+        hero: {
+          /* `side` pairs the heading block with the search box on one row instead of stacking the
+             search below the subtitle — see the note on `searchSide` in SupportPortalPreview.tsx. */
+          searchPlacement: 'side',
+          height: 190,
+          bgKind: 'color',
+          bannerStyle: 'flat',
+          bannerColor: '#3D8BD0',
+          headingColor: '#FFFFFF',
+        },
+        /* Same flat colour as the hero (see the note above) plus the new `glass` look, which is what
+           removes the climb, tightens the padding and leaves each card free to pick its own
+           `cardTemplate` — none of which `tile` would have allowed. */
+        quick: { cols: '4', fill: 'color', bg: '#3D8BD0' },
+        'quick-incident': { fill: 'color', bg: '#FFFFFF', radius: 14 },
+        'quick-service': { fill: 'color', bg: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', radius: 14, cardTemplate: 'stackedLeft', sub: '', minHeight: 100 },
+        'quick-ad': { fill: 'color', bg: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', radius: 14, cardTemplate: 'stackedLeft', sub: '', minHeight: 100 },
+        'quick-knowledge': { fill: 'color', bg: 'rgba(255,255,255,0.14)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.22)', radius: 14, cardTemplate: 'stackedLeft', sub: '', minHeight: 100 },
+        /* Four tiles each, two across — so both sections are the same object at the same size and
+           the row reads as one browse area rather than as two lists of different lengths. */
+        favourites: { show: 4 },
+        services: { show: 4 },
+        work: { cols: '3' },
+        records: { cols: '2' },
+        page: { quickLook: 'glass', heroArt: 'counter', browseLook: 'split', railHome: 'below' },
+      },
+      /* Per-card text/icon colour — the CONFIG keys above paint the tile itself, these paint what
+         sits on top of it. Kept apart because `fillCss` reads config while `roleStyle`/`chosen` read
+         style, exactly the split every other template in this file already respects.
+         ⚠️ A title/subtitle colour is NOT a flat `color` key — `roleStyle` resolves it through
+         `NodeStyle.type[role].color` (P3's per-role type system), keyed by the TEXT node's own id
+         (`${cardId}-title` / `${cardId}-sub`) and role ('title' / 'body'). A flat `{ color }` here
+         would sit at a key `resolveType` never reads and stay silently inert.
+         ⚠️ `iconColor`/`iconFill` are flat, by contrast — `chosen(styles, cardId, key)` reads them
+         straight off the CARD's own id, not through the type-role system, and off the STYLE store
+         rather than `cfg` (setting them in the config entries above would be exactly as inert, the
+         same trap `fillCss`'s own note warns about one level up). `iconFill: 'transparent'` on the
+         three glass tiles is what removes their icon's badge square, leaving a bare glyph on the
+         colour — Report an Incident keeps its badge, so it is left unset there. */
+      styles: {
+        /* ⚠️ `columns` lives in the STYLE store, not in cfg — §7.8 puts it there because the
+           Content tab and the Arrangement pack are two controls for one value. Set in cfg it is
+           written to a key the renderer does not read. */
+        favourites: { columns: 2 },
+        services: { columns: 2 },
+        /* ONE column each, so My Assets and My CIs read as a list of records rather than a 2×2 of
+           tiles — the anatomy stays the tile's (icon box · name · id · kind), only the track count
+           changes. */
+        assets: { columns: 1 },
+        cis: { columns: 1 },
+        'quick-incident-title': { type: { title: { color: '#0B2545' } } },
+        'quick-incident-sub': { type: { body: { color: '#5A6B81' } } },
+        'quick-service-title': { type: { title: { color: '#FFFFFF' } } },
+        'quick-ad-title': { type: { title: { color: '#FFFFFF' } } },
+        'quick-knowledge-title': { type: { title: { color: '#FFFFFF' } } },
+        'quick-incident': { iconColor: '#FFFFFF', iconFill: '#0B2545' },
+        'quick-service': { iconColor: '#FFFFFF', iconFill: 'transparent' },
+        'quick-ad': { iconColor: '#FFFFFF', iconFill: 'transparent' },
+        'quick-knowledge': { iconColor: '#FFFFFF', iconFill: 'transparent' },
+      },
+    },
+  },
+  {
+    id: 'tpl-deskrail',
+    name: 'Service Counter',
+    /* A standing rail of destinations beside the requester’s own records — a counter, which is what
+       a citizen service point and a bank branch both are. */
+    industries: ['government', 'bfsi'],
+    desc: 'The banner turns on its side — a full-height navy rail carrying the greeting, the search and the three doors, with everything the requester owns in the column beside it.',
+    category: 'IT Support',
+    layout: 'deskrail',
+    accent: '#16233A',
+    badge: 'New',
+    blocks: ['Side rail hero', 'Search', 'Quick actions (rows)', 'My Open Requests', 'Pending Approvals', 'Announcements', 'Most Read', 'Favourite Services', 'Most Used Services', 'My Assets', 'My CIs'],
+    /* ── Service Counter ───────────────────────────────────────────────────
+       ⚠️ A new page ARCHETYPE, not a banner variant — `heroPlacement: 'left'`. The hero stops
+       being a band across the top and becomes a column beside everything else, so the page divides
+       exactly once: the rail is what you DO, the right column is what you HAVE. Every other
+       template here is top-down; this is the only one that is not.
+       ⚠️ The reference image carries no search at all. It is added back into the rail, under the
+       subtitle — a portal whose catalogue is 300 services and whose only affordance is three doors
+       makes the fourth thing you might want unreachable.
+       ⚠️ FOUR action rows, not the image's three. Knowledge is one of this product's four fixed
+       quick actions; dropping it because a mock showed three would be letting the picture decide
+       what the product ships.
+
+       THE RIGHT COLUMN IS FOUR ROWS OF TWO, and every one of them is two equal halves — which is
+       what makes the column read as a column rather than as a pile of cards of assorted widths:
+         1  Most Read        | Announcements    what there is to read
+         2  My Open Requests | Pending Approvals    what is on you
+         3  Favourite Svcs   | Most Used Svcs   what you can ask for
+         4  My Assets        | My CIs           what you already have
+       ⚠️ Reading comes FIRST, above the fold. An announcement is the one thing on this page that
+       is addressed to everybody and is time-bound — a P1 outage notice under two rows of personal
+       worklists is a notice nobody reads. The requester's own records keep the rest of the column,
+       in the order they are asked about: what is open, what could be asked for, what is owned.
+       ⚠️ Each services section is FOUR CARDS IN TWO COLUMNS, so both fit a half-width column with
+       the icon and the category still on the card. Four across would have made them 80px wide.
+       ⚠️ THE RAIL DOES NOT SCROLL. It is sticky and viewport-tall, so the greeting, the search,
+       the four doors and Contact Us are on screen at every scroll position while the right column
+       moves under them. That is the argument for a rail in the first place: a banner that scrolls
+       away is a decoration, and one that stays is navigation. It also settles where Contact Us
+       goes — pinned to the rail's foot, it is permanently reachable rather than being the reward
+       for scrolling to the bottom of the page, which is the one place a person who cannot find
+       what they need has already given up before reaching.
+       ⚠️ Contact Us is the one card NOT in the right column. It is not a record — it is the
+       fallback when nothing else on the page worked — and the rail is already the dark surface
+       carrying the opening hours, which is the same kind of information. Putting it there keeps the
+       right column purely about the requester's own records. It rides in the rail via `rail` +
+       `railHome: 'hero'`. */
+    seed: {
+      blockOrder: ['quick', 'work', 'favourites', 'services', 'records'],
+      rowOrder: {
+        quick: ['quick-incident', 'quick-service', 'quick-ad', 'quick-knowledge'],
+        /* ⚠️ The band is TWO rows and `rail` is the split, so this array's job is only to say who
+           is a member — the ORDER of the rows is `railHome`, and the order WITHIN the rail row is
+           the `rail` array below. */
+        /* ⚠️ `contact` is a MEMBER here even though the hero draws it — `card()` gates on row
+           membership, so a card missing from this list renders nowhere at all. */
+        work: ['requests', 'approvals', 'news', 'knowledge', 'contact'],
+        records: ['assets', 'cis'],
+      },
+      /* ⚠️ Most Read FIRST, so it takes the left half. Reading order in a two-column row is the
+         array's order, which is the whole reason this is a list and not a set. */
+      rail: ['knowledge', 'news'],
+      cfg: {
+        hero: {
+          /* Copy from the reference. The hours line is the product's own `sub`; the greeting and
+             the sentence under it are what the image says, because they are the words that make a
+             counter read as a counter. */
+          heading: 'Welcome to Support Portal',
+          sub: 'Report a fault, request a service, or reset your account. No appointment needed.',
+          bgKind: 'color',
+          bannerStyle: 'gradient',
+          bannerColor: '#1E3050',
+          headingColor: '#FFFFFF',
+          contentAlign: 'left',
+          contentMaxWidth: 100,
+          searchWidth: 100,
+          searchRadius: 10,
+          /* The counter's opening hours — its own field rather than more words in `sub`, because
+             it is a fact with a clock beside it. */
+          note: 'Counter staffed Mon–Fri, 09:00–17:00',
+          /* The rail is a column, so it fills the page's height rather than setting one. */
+          height: 560,
+        },
+        /* ONE per row — a rail is a column, so a card wider than it is tall is the only shape that
+           fits it. The glass treatment is per-card below. */
+        quick: { cols: '1' },
+        'quick-incident': { fill: 'color', bg: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', radius: 10, sub: '' },
+        'quick-service': { fill: 'color', bg: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', radius: 10, sub: '' },
+        'quick-ad': { fill: 'color', bg: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', radius: 10, sub: '' },
+        'quick-knowledge': { fill: 'color', bg: 'rgba(255,255,255,0.10)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.18)', radius: 10, sub: '' },
+        work: { cols: '2' },
+        records: { cols: '2' },
+        /* ⚠️ The ACTION-CARD treatment: icon left in an accent badge, name, and the category as an
+           uppercase label under it. At two columns a service tile is the same object as one of the
+           four cards in the rail — same width, same two lines, same job — so painting it any other
+           way would put two card languages on one page.
+           ⚠️ `cardTemplate` (where the icon sits) and `tileLook` (how the card is painted) stay
+           SEPARATE keys, so the widget's own Icon-position picker still does something. */
+        favourites: { show: 4, cardTemplate: 'left', tileLook: 'action' },
+        services: { show: 4, cardTemplate: 'left', tileLook: 'action' },
+        /* ⚠️ The row treatment from the reference: subject over a short timestamp in one text
+           column, and the status as a coloured DOT rather than a filled pill. Five filled pills in
+           a column are five of the loudest objects on the page, competing with the subjects they
+           exist to qualify. */
+        requests: { rowLayout: 'meta', statusTone: 'dot', dateFormat: 'short' },
+        /* ⚠️ THE SAME row shape as Requests. Two cards side by side that arrange their rows
+           differently read as two different kinds of thing, which is the one thing this page is
+           trying not to say. */
+        approvals: { rowLayout: 'meta' },
+        knowledge: { dateFormat: 'short' },
+        /* A bullet as the leading token, so this list opens the way every other list on the page
+           does, and "Posted" to turn a bare date into a fact about the announcement.
+           ⚠️ THREE, matching Most Read beside it. The row equalises its two cards' heights, so at
+           two notices Announcements was a card two-thirds empty next to a full one — and the
+           emptiness read as "nothing else is happening" rather than as a display setting. */
+        news: { bullets: true, datePrefix: 'Posted', show: 3 },
+        page: {
+          heroPlacement: 'left',
+          quickLook: 'rail',
+          /* ⚠️ CARDS, not chips. Chips were chosen because they wrap and never leave a hole, and
+         they do — but they read as filters, and a portal's catalogue is a set of destinations
+             rather than a set of tags. At four services in two columns a card has room for its
+             icon and its category again, which is what a chip had to drop to stay a chip. */
+          servicesLook: 'plain',
+          /* Favourite Services and Most Used Services share ONE row, half each. */
+          browseLook: 'split',
+          railHome: 'above',
+          contactHome: 'hero',
+          /* The rail holds still; the right column carries the page's only scrollbar. */
+          heroSticky: true,
+          /* Tighter corners on every card — the reference's squared treatment. A PAGE decision, so
+             no card can end up rounder than the one beside it. */
+          cardLook: 'square',
+          /* Every data card leads with a tinted badge, or none does. */
+          cardHead: 'icon',
+          heroArt: 'rings',
+        },
+      },
+      styles: {
+        /* White on navy, for every word in the rail. */
+        'quick-incident-title': { type: { title: { color: '#FFFFFF' } } },
+        'quick-service-title': { type: { title: { color: '#FFFFFF' } } },
+        'quick-ad-title': { type: { title: { color: '#FFFFFF' } } },
+        'quick-knowledge-title': { type: { title: { color: '#FFFFFF' } } },
+        'quick-incident': { iconColor: '#FFFFFF', iconFill: 'transparent' },
+        'quick-service': { iconColor: '#FFFFFF', iconFill: 'transparent' },
+        'quick-ad': { iconColor: '#FFFFFF', iconFill: 'transparent' },
+        'quick-knowledge': { iconColor: '#FFFFFF', iconFill: 'transparent' },
+        /* One column each — a list of records, not a 2x2 of tiles. */
+        assets: { columns: 1 },
+        cis: { columns: 1 },
+        /* ⚠️ TWO columns, four cards — and `columns` lives in the STYLE store, not in cfg, because
+           §7.8 puts it there so the Content tab and the Arrangement pack cannot become two
+           controls for one value. A seed writing it into `cfg` sets a key nothing reads. */
+        favourites: { columns: 2 },
+        services: { columns: 2 },
+      },
+    },
+  },
+  {
+    id: 'tpl-catalog',
+    hidden: true, // no design behind it yet — see the note on `hidden`
+    name: 'Service Catalog First',
+    desc: 'Leads with browsable service categories for portals where most traffic is a request, not an incident.',
+    category: 'General',
+    layout: 'catalog',
+    accent: '#134E4A',
+    blocks: ['Compact search', 'Category grid', 'Featured services', 'My Open Requests'],
+  },
+  {
+    id: 'tpl-knowledge',
+    hidden: true, // no design behind it yet — see the note on `hidden`
+    name: 'Knowledge Hub',
+    desc: 'A self-service reading room — curated collections, most read, and a contact-us fallback at the end.',
+    category: 'General',
+    layout: 'knowledge',
+    accent: '#3730A3',
+    blocks: ['Search hero', 'Collections', 'Most Read', 'Contact us'],
+  },
+  {
+    id: 'tpl-hr',
+    hidden: true, // no design behind it yet — see the note on `hidden`
+    name: 'People & HR Desk',
+    desc: 'An HR-facing portal — leave, payroll and onboarding requests up front, policy documents beside them.',
+    category: 'HR',
+    layout: 'catalog',
+    accent: '#831843',
+    blocks: ['Compact search', 'HR service categories', 'Policy documents', 'My Open Requests'],
+  },
+  {
+    id: 'tpl-minimal',
+    hidden: true, // no design behind it yet — see the note on `hidden`
+    name: 'Minimal Landing',
+    desc: 'One search field and three actions on a light canvas. Nothing else competes for the first click.',
+    category: 'General',
+    layout: 'minimal',
+    accent: '#334155',
+    badge: 'New',
+    blocks: ['Light hero', 'Quick actions', 'Announcements'],
+  },
+  {
+    id: 'tpl-status',
+    hidden: true, // no design behind it yet — see the note on `hidden`
+    name: 'Announcements & Status',
+    desc: 'Opens with live announcements and service status, for portals used during major incidents.',
+    category: 'Facilities',
+    layout: 'status',
+    accent: '#7C2D12',
+    blocks: ['Announcement banner', 'Service status', 'Hero search', 'My Open Requests'],
+  },
+];
+
+/* The portal every tenant already has. It is a SYSTEM page: shipped with the product, always
+   present, and the one a requester lands on today — which is why the listing opens with it rather
+   than an empty state, and why it is the one page the delete action refuses. */
+/* ⚠️ The DEFAULT keeps id SPP-1. Being the default is tested by id in a dozen places — the badge,
+   the locked Enabled toggle, the undeletable row, the portal's own address — so giving the new
+   layout a new id would have moved every one of those onto the old page. The id is the identity of
+   "the portal requesters land on"; which layout it carries is a property of it, not a new thing. */
+export const DEFAULT_PORTAL_PAGE: PortalPage = {
+  id: 'SPP-1',
+  name: 'Support Portal',
+  layout: 'v2',
+  type: 'System',
+  status: 'Published',
+  source: 'Classic Service Desk',
+  audience: 'All requesters',
+  modifiedAt: 'Mon, Aug 17, 2026 09:14 AM',
+  modifiedBy: 'Juli Gopani',
+  dirty: true,
+  /* ⚠️ The seeded portal answers the SAME questions Create asks, so Edit details opens on a filled
+     record rather than a form with a disabled Save. A default that cannot satisfy its own required
+     fields reads as a broken row, not as a portal nobody has finished. */
+  company: 'Acme Corporation',
+  url: 'support.acme.com',
+  idp: 'None — use ServiceOps login',
+  ssoOnly: false,
+};
+
+/** The arrangement the builder shipped with, kept as a portal of its own. */
+export const SECOND_PORTAL_PAGE: PortalPage = {
+  ...DEFAULT_PORTAL_PAGE,
+  id: 'SPP-2',
+  name: 'Support Portal - 2',
+  layout: 'v1',
+  url: 'support.acme.com/portal-2',
+  dirty: false,
+  modifiedAt: 'Mon, Aug 17, 2026 09:14 AM',
+};
+
+/* The listing says WHEN in relative terms, because "2 days ago" is the question an admin is
+   actually asking of that column; the full stamp stays on the record for anywhere precision
+   matters. Falls back to the raw stamp if it cannot be parsed rather than printing "NaN days". */
+export function relPortalStamp(stamp: string): string {
+  const t = Date.parse(stamp);
+  if (Number.isNaN(t)) return stamp;
+  const days = Math.floor((Date.now() - t) / 86400000);
+  if (days <= 0) return 'today';
+  if (days === 1) return 'yesterday';
+  if (days < 30) return days + ' days ago';
+  const months = Math.floor(days / 30);
+  return months === 1 ? 'a month ago' : months + ' months ago';
+}
+
+export const TEMPLATE_CATEGORIES = ['All', 'IT Support', 'HR', 'Facilities', 'General'] as const;
+
+/* ── The default layout the canvas renders ───────────────────────────────── */
+
+export interface PortalRequest { id: string; subject: string; at: string; status: string }
+export interface PortalApproval { id: string; subject: string; reason: string; at: string; by: string; initials: string; color: string }
+export interface PortalArticle { id: string; title: string; at: string; tag: string }
+
+export const PORTAL_QUICK_ACTIONS = [
+  { key: 'incident', title: 'New Incident', desc: 'Report an incident' },
+  { key: 'service', title: 'Request Service', desc: 'Browse the services offered' },
+  { key: 'knowledge', title: 'Knowledge', desc: 'Browse knowledge' },
+] as const;
+
+/** 8 open in total; the card lists the four most recent, which is what the live portal does.
+ *  ⚠️ The BADGE counts all of them and the card shows four — the contract every live card on this
+ *  page keeps: show a few, count them all, and "View all" is the way to the rest. */
+export const PORTAL_OPEN_REQUEST_TOTAL = 8;
+
+/* Statuses vary on purpose: the builder's Statuses filter has to visibly do something, and a list
+   where every row says "Open" would make a working filter look broken. */
+export const PORTAL_OPEN_REQUESTS: PortalRequest[] = [
+  { id: 'SR-201', subject: 'Request for New Laptop', at: 'Wed, Aug 12, 2026 10:09 AM', status: 'Open' },
+  { id: 'INC-187', subject: 'Cannot Create KB Article', at: 'Mon, Aug 10, 2026 11:43 AM', status: 'In Progress' },
+  { id: 'SR-180', subject: 'Employee On-boarding', at: 'Wed, Aug 05, 2026 03:22 PM', status: 'Open' },
+  { id: 'INC-178', subject: 'Password Reset Required', at: 'Wed, Aug 05, 2026 12:03 PM', status: 'Pending' },
+  { id: 'INC-170', subject: 'Laptop Slow and Lagging', at: 'Tue, Aug 04, 2026 03:51 PM', status: 'In Progress' },
+  { id: 'SR-166', subject: 'Access to Finance Drive', at: 'Mon, Aug 03, 2026 09:14 AM', status: 'On Hold' },
+  { id: 'INC-159', subject: 'VPN Disconnects Frequently', at: 'Fri, Jul 31, 2026 04:02 PM', status: 'Open' },
+  { id: 'INC-151', subject: 'Monitor Flickering', at: 'Thu, Jul 30, 2026 11:20 AM', status: 'Resolved' },
+  { id: 'SR-147', subject: 'Software License Renewal', at: 'Wed, Jul 29, 2026 02:45 PM', status: 'Closed' },
+  { id: 'INC-142', subject: 'Printer Not Responding', at: 'Tue, Jul 28, 2026 10:33 AM', status: 'Reopened' },
+];
+
+/** Status pill colours, so a filtered list still reads at a glance. */
+export const REQUEST_STATUS_TONE: Record<string, { fg: string; bg: string }> = {
+  'Open': { fg: '#B45309', bg: '#FEF3C7' },
+  'In Progress': { fg: '#1D4ED8', bg: '#DBEAFE' },
+  'Pending': { fg: '#7C3AED', bg: '#EDE9FE' },
+  'On Hold': { fg: '#64748B', bg: '#F1F5F9' },
+  'Resolved': { fg: '#22A06B', bg: '#ECFDF3' },
+  'Closed': { fg: '#64748B', bg: '#F1F5F9' },
+  'Reopened': { fg: '#DC2626', bg: '#FEF3F2' },
+};
+
+/* ⚠️ The SAME statuses restated for a dark surface. A 10% tint is a pale wash on white and a glare
+   on #16233A, so the fill drops to a deep version of its own hue and the text lifts to the bright
+   end of it — the pill still reads as "amber" or "green", which is the only job it has, without
+   becoming the loudest thing on a dark page. Chosen by mode rather than filtered, because a filter
+   would shift every hue by the same amount and the point of these is that they differ. */
+export const REQUEST_STATUS_TONE_DARK: Record<string, { fg: string; bg: string }> = {
+  'Open': { fg: '#FBBF24', bg: '#3A2A0A' },
+  'In Progress': { fg: '#93C5FD', bg: '#12325A' },
+  'Pending': { fg: '#C4B5FD', bg: '#2B2350' },
+  'On Hold': { fg: '#9FB3C8', bg: '#22334F' },
+  'Resolved': { fg: '#4ADE80', bg: '#12351F' },
+  'Closed': { fg: '#9FB3C8', bg: '#22334F' },
+  'Reopened': { fg: '#F87171', bg: '#3A1717' },
+};
+
+/** The tone for a status in the mode that is on. One lookup, so no call site can pick the wrong set. */
+export const statusTone = (status: string, dark = false) =>
+  (dark ? REQUEST_STATUS_TONE_DARK : REQUEST_STATUS_TONE)[status]
+  ?? (dark ? { fg: '#9FB3C8', bg: '#22334F' } : { fg: '#64748B', bg: '#F1F5F9' });
+
+export const PORTAL_APPROVALS: PortalApproval[] = [
+  {
+    id: 'INC-192', subject: 'Wrong configuration details', reason: 'editorial review',
+    at: 'Tue, Aug 11, 2026 02:14 PM', by: 'Rosy', initials: 'RO', color: '#3D8BD0',
+  },
+  {
+    id: 'AST-13', subject: 'DESKTOP-5JPPI6F', reason: 'asset assignment',
+    at: 'Mon, Aug 10, 2026 12:57 PM', by: 'Keya', initials: 'KE', color: '#7C3AED',
+  },
+];
+
+/** 412 articles read in total; the card lists four. */
+export const PORTAL_ARTICLE_TOTAL = 412;
+
+/* ⚠️ Tags are ONE WORD where the catalogue has one. "Guideline Documents" is a chip at the end of a
+   row that already holds an id, a title and a timestamp — at that width it truncates, and a
+   truncated category reads as a fault rather than as a category. */
+export const PORTAL_ARTICLES: PortalArticle[] = [
+  { id: 'KB-4', title: 'How to Reset Your Password', at: 'Thu, Jul 30, 2026 11:34 AM', tag: 'Guideline' },
+  { id: 'KB-1', title: 'Connecting to Company VPN', at: 'Sun, Jul 19, 2026 10:58 PM', tag: 'FAQs' },
+  { id: 'KB-6', title: 'Reporting a Hardware Fault', at: 'Tue, Aug 11, 2026 04:38 PM', tag: 'Guideline' },
+  { id: 'KB-9', title: 'Requesting Software Installation', at: 'Fri, Aug 07, 2026 09:12 AM', tag: 'How-to' },
+];
+
+/* ── Add panel — the element catalogue ───────────────────────────────────── */
+
+/* Groups render in this order. **Components** is deliberately first: the system blocks a support
+ * portal is actually made of are what an admin reaches for, and burying them under generic layout
+ * primitives would make the common case the hard one. Everything below Components is the generic
+ * toolkit, in the order Duda uses (layout → basic → visual → business → custom). */
+/* ⚠️ No 'Layout' group. It held two elements — a Divider and Advanced Tabs — which are as basic as
+   anything in Basic; a tab of two rows is a category that costs more to scan than it saves. */
+export const PORTAL_ELEMENT_GROUPS = ['Data', 'Actions', 'Basic', 'Visual', 'Custom'] as const;
+export type PortalElementGroup = (typeof PORTAL_ELEMENT_GROUPS)[number];
+
+export interface PortalElement {
+  id: string;
+  name: string;
+  /** Key into the panel's icon registry. */
+  icon: string;
+  group: PortalElementGroup;
+  /** System components only — this element IS a block the page ships with. */
+  onPage?: boolean;
+  /* The node id of that block, so "is it on the page right now" can be ANSWERED rather than
+     assumed.
+     ⚠️ `onPage` is a fact about the catalogue and never changes; this is what lets the palette read
+     the LIVE page instead. Delete My Assets from the page and its row goes back to addable — a
+     static flag would have gone on claiming it was there. */
+  node?: string;
+  /** Extra words the search should match (variants, synonyms) without cluttering the row. */
+  keywords?: string;
+  /* ⚠️ Withheld from the palette, but NOT deleted. Its spec and renderer stay, so anything already
+     on a page keeps working and the decision is one flag to reverse. Deleting the entry would take
+     the element off existing pages too, which is a different and much larger decision. */
+  hidden?: boolean;
+}
+
+/* ⚠️ `onPage` mirrors what SupportPortalPreview actually renders as a BUILT-IN band. Keep the two
+   in step: the builder's demo seed lays out one example section per element and skips these, so a
+   flag that has drifted shows the untouched page carrying My Open Requests twice — or missing the
+   example of a block it does not actually have.
+   ⚠️ It no longer governs the PALETTE. Every element is addable, every time; a row that greys out
+   because the page already has one has to stay in step with the page to be truthful, and it never
+   quite did. What a page RENDERS and what an admin may ADD are two questions, and this answers the
+   first. */
+
+/* ── Record List — the modules an admin can point one at ──────────────────
+ *
+ * A Record List is the six live-data cards with the question left open: same card, same rows, same
+ * empty state, but the admin chooses WHICH records and WHICH of them.
+ *
+ * ⚠️ Statuses are declared PER MODULE, because they are not the same words. A request is Open or
+ * Resolved, a change is Draft or Approved, a patch is Missing or Installed — one shared status list
+ * would offer every module several options that can never match anything.
+ * ⚠️ The rows here are DUMMY DATA, and deliberately so: the card lands on the page showing its shape
+ * before it has been configured, the way every other widget in this builder does. The real query is
+ * the backend's, and these rows are what stands in for it until then.
+ * ⚠️ Adding a module is adding a row to this list — nothing else knows the set. */
+export interface RecordModule {
+  key: string;
+  label: string;
+  /* ⚠️ WITHHELD from the Module dropdown, NOT deleted — the same rule `PortalElement.hidden` and
+     the template gallery both follow. `recordModule()` still resolves a hidden key, so a card
+     already pointed at one keeps its rows, its statuses and its filter; only the picker stops
+     offering it. Deleting the entry would have silently re-pointed every such card at Requests. */
+  hidden?: boolean;
+  statuses: string[];
+  rows: { id: string; title: string; status: string; meta: string }[];
+}
+
+/** The modules the picker actually offers — everything not withheld by `hidden`.
+ *
+ * ⚠️ `RECORD_MODULES` stays the FULL list because `recordModule()` resolves a saved key through
+ * it, and a card built on a module that has since been withheld must keep working rather than
+ * quietly becoming a Requests card. Same split `VISIBLE_TEMPLATES` makes, for the same reason. */
+export const VISIBLE_RECORD_MODULES = (): RecordModule[] => RECORD_MODULES.filter((m) => !m.hidden);
+
+/* ── Banner layouts ──────────────────────────────────────────────────────────
+ *
+ * A whole banner — its shape, its treatment and whatever widgets belong in it — chosen as one
+ * thing. It replaces `bannerType`, which offered three abstract SHAPES (regular / with card /
+ * with image) and left the admin to build the rest by hand: the shape was the least interesting
+ * part of the decision and the only part it answered.
+ *
+ * ⚠️ ORIENTATION is the one hard split. A HORIZONTAL banner is a band across the top and every
+ * section runs full width beneath it. A VERTICAL banner is a column, so the page becomes two
+ * columns — the same `heroPlacement: 'left'` archetype the Service Counter template ships. That
+ * restructures the whole page, which is why a portal that already has a page full of content is
+ * offered horizontal layouts only, and a from-scratch one is offered both.
+ *
+ * ⚠️ Each layout is SEED DATA over the shared renderer — the subsystem's "seeds, not a second
+ * renderer" rule. A layout that drew itself would be a second banner to keep in step with the
+ * first, and the two would drift the moment a control changed.
+ *
+ * Drawn from the reference canvas at `ServiceOps portal layout system/Support Portal Layout
+ * System.dc.html` — all 21 of its artboards, plus `classic`, which is this product's own resting
+ * banner and the way back out of any of them. The artboard each layout came from is named on its
+ * `from` field so the original is one click away.
+ * ⚠️ There is a SECOND, older copy of that file at `public/portal-layouts/`. It is not the same
+ * file — the md5s differ — so read the one named above. */
+export interface BannerLayout {
+  id: string;
+  name: string;
+  /** One line on what this banner is FOR — the picker's tooltip, not a description of its parts. */
+  note: string;
+  /** The artboard in the reference canvas, so a future change can go back to the source. */
+  from?: string;
+  orientation: 'horizontal' | 'vertical';
+  /** Written onto the hero's own config. */
+  hero: Record<string, unknown>;
+  /** Written onto the PAGE's config — how the band sits in the page, not how it looks. */
+  page?: Record<string, unknown>;
+  /** Widgets the layout puts IN the banner, in order. */
+  widgets?: { type: string; cfg?: Record<string, unknown> }[];
+  /** Where those widgets go: beside the heading, or under it. */
+  slot?: 'side' | 'below';
+  /** This layout has a picture beside the words, so the picture field is worth offering. */
+  hasImage?: boolean;
+}
+
+/* ⚠️ A count tile is the ONE widget these layouts place, and it is placed with its query already
+   set. The admin restyles it and cannot re-point it — a tile whose label and number can be made
+   to disagree is worse than no tile. `__fromLayout` is what withholds its Content section. */
+/* ⚠️ `source` must be one of `count_tile`'s OWN options — 'Approvals waiting on me', not the
+   'My approvals' it reads like. A source the spec does not list falls through to a count of zero
+   with nothing on screen saying why. */
+const countTile = (label: string, source: string, icon: string) =>
+  ({ type: 'x-kpi', cfg: { label, source, icon, __fromLayout: true } });
+
+export const BANNER_LAYOUTS: BannerLayout[] = [
+  {
+    id: 'classic', name: 'Classic', orientation: 'horizontal',
+    note: 'The band this product ships with — heading, sub-heading and the search in the middle.',
+    /* ⚠️ NO overrides at all. This is the resting banner, so applying it must UNSET whatever the
+       last layout wrote rather than paint a copy of the default over the top — otherwise every
+       key it does not mention keeps the previous layout's value and "Classic" is not classic. */
+    hero: {},
+  },
+
+  /* ── Short bands: a greeting, and what is waiting on you ─────────────────────────────── */
+  {
+    id: 'mosaic', name: 'Mosaic', orientation: 'horizontal', from: '4c',
+    note: 'A compact white bar — the welcome on the left, the search on the right of the same line.',
+    hero: {
+      heading: 'Welcome to the IT Service Desk',
+      sub: 'Raise a ticket, request a service or find the answer yourself.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#FFFFFF',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 45, searchRadius: 4, height: 180,
+    },
+    page: { heroInk: 'dark' },
+  },
+  {
+    id: 'rails', name: 'Rails', orientation: 'horizontal', from: '4i', slot: 'side',
+    note: 'A quiet greeting on the page ground, with what you own counted beside it.',
+    hero: {
+      heading: 'Good morning, Yash',
+      sub: 'Two approvals need you today. Everything else is moving.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#FFFFFF',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: false, height: 180,
+    },
+    page: { heroInk: 'dark' },
+    widgets: [
+      countTile('Open requests', 'My requests', 'ticket'),
+      countTile('Approvals', 'Approvals waiting on me', 'shieldcheck'),
+      countTile('Assets & CIs', 'My assets', 'laptop'),
+    ],
+  },
+  {
+    id: 'concierge2', name: 'Concierge II', orientation: 'horizontal', from: '3h2', slot: 'side',
+    note: 'The same greeting on a pale ground, with the counts joined into one outlined strip.',
+    hero: {
+      heading: 'Welcome back, Yash',
+      sub: 'Acme Corporation IT Service Desk',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#F4F7FB',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: false, height: 180,
+    },
+    page: { heroInk: 'dark' },
+    widgets: [
+      countTile('Open requests', 'My requests', 'ticket'),
+      countTile('Approvals', 'Approvals waiting on me', 'shieldcheck'),
+      countTile('My assets', 'My assets', 'laptop'),
+    ],
+  },
+  {
+    id: 'dispatch', name: 'Dispatch', orientation: 'horizontal', from: '3d', slot: 'side',
+    note: 'A dark strip that holds the greeting, the search and the counts on one line.',
+    hero: {
+      heading: 'Good morning, Yash',
+      sub: 'Two approvals need you today · everything else is moving',
+      bgKind: 'color', bannerStyle: 'gradient', bannerColor: '#0F2847',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 60, searchRadius: 9, height: 180,
+    },
+    widgets: [
+      countTile('Open requests', 'My requests', 'ticket'),
+      countTile('Approvals', 'Approvals waiting on me', 'shieldcheck'),
+      countTile('My CIs', 'My CIs', 'server'),
+    ],
+  },
+  {
+    id: 'concierge', name: 'Concierge', orientation: 'horizontal', from: '3h', slot: 'side',
+    note: 'A dark welcome bar with three glass counters — who you are, and what is waiting.',
+    hero: {
+      heading: 'Welcome back, Yash',
+      sub: "Acme Corporation IT Service Desk · we're here to help. Tell us what you need.",
+      bgKind: 'color', bannerStyle: 'gradient', bannerColor: '#16325B',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: false, height: 180,
+    },
+    widgets: [
+      countTile('Open requests', 'My requests', 'ticket'),
+      countTile('Approvals', 'Approvals waiting on me', 'shieldcheck'),
+      countTile('My changes', 'My changes', 'refreshcw'),
+    ],
+  },
+  {
+    id: 'sidecar', name: 'Sidecar', orientation: 'horizontal', from: '3b',
+    note: 'A slim dark masthead: who this desk is on the left, the search on the right.',
+    hero: {
+      heading: 'Acme Corporation · IT Service Desk',
+      sub: 'Hardware, software, access and connectivity in one place',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#12233F',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 45, searchRadius: 10, height: 180,
+    },
+  },
+
+  /* ── Mid bands: a greeting that carries numbers or a route in ───────────────────────── */
+  {
+    id: 'ledger', name: 'Ledger', orientation: 'horizontal', from: '2b', slot: 'side',
+    note: 'Today\u2019s date and a personal greeting, with four counters squared up beside them.',
+    hero: {
+      heading: 'Good afternoon, Yash',
+      sub: 'Two approvals are waiting on you, and one request needs more information.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#EAF1FA',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: false, height: 260,
+    },
+    page: { heroInk: 'dark' },
+    widgets: [
+      countTile('Open requests', 'My requests', 'ticket'),
+      countTile('Approvals', 'Approvals waiting on me', 'shieldcheck'),
+      countTile('My changes', 'My changes', 'refreshcw'),
+      countTile('My assets', 'My assets', 'laptop'),
+    ],
+  },
+  {
+    id: 'broadsheet', name: 'Broadsheet', orientation: 'horizontal', from: '4b',
+    note: 'A department masthead — a big title over a pale ground, no search to compete with it.',
+    hero: {
+      heading: 'Information Technology',
+      sub: 'Hardware, software, access and connectivity — raise a ticket or find the answer yourself.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#EEF3FA',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: false, height: 260,
+    },
+    page: { heroInk: 'dark' },
+  },
+  {
+    id: 'atlas', name: 'Atlas', orientation: 'horizontal', from: '3g',
+    note: 'A dark rounded band lit from behind — the search sits inside it, on the brand colour.',
+    hero: {
+      heading: 'Welcome back, Yash',
+      sub: 'Two approvals need you today. Everything else is moving.',
+      bgKind: 'color', bannerStyle: 'gradient', bannerColor: '#0B2545',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 55, searchRadius: 10, height: 260,
+    },
+    page: { heroArt: 'shapes' },
+  },
+
+  /* ── Tall bands: the banner is the top half of the page ─────────────────────────────── */
+  {
+    id: 'prism', name: 'Prism', orientation: 'horizontal', from: '2a',
+    note: 'A soft tinted panel with concentric rings behind the words — warm, and not corporate.',
+    hero: {
+      heading: 'How can we help you today?',
+      sub: 'Search the knowledge base, or raise a request and we will route it.',
+      bgKind: 'color', bannerStyle: 'light', bannerColor: '#E6F4EC',
+      headingColor: '#0C2F24', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 70, searchRadius: 12, height: 360,
+    },
+    page: { heroInk: 'dark', heroArt: 'rings' },
+  },
+  {
+    id: 'portico', name: 'Portico', orientation: 'horizontal', from: '4d', hasImage: true,
+    note: 'Your own artwork beside the words — the one layout that carries a picture in the band.',
+    hero: {
+      heading: 'Welcome to Acme IT',
+      sub: 'Raise a ticket, request a service or search the knowledge base.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#FFFFFF',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 100, height: 360,
+    },
+    page: { heroInk: 'dark' },
+  },
+  {
+    id: 'atrium', name: 'Atrium', orientation: 'horizontal', from: '4e',
+    /* ⚠️ `bgKind: 'image'` with nothing uploaded falls back to a dark gradient, which is a
+       usable band AND an invitation to add the photograph — not an empty frame. */
+    note: 'A photograph across the whole band, with the welcome reading over the dark end of it.',
+    hero: {
+      heading: 'IT Service Desk & Support Centre',
+      sub: 'Hardware, software, access and connectivity — raise a ticket or find the answer yourself.',
+      bgKind: 'image', headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: false, height: 360,
+    },
+  },
+  {
+    id: 'wayfinder', name: 'Wayfinder', orientation: 'horizontal', from: '3i', slot: 'side',
+    note: 'A search-led welcome on a pale ground, with the numbers held to one side of it.',
+    hero: {
+      heading: 'Find the help you need, in one search.',
+      sub: 'Search the knowledge base and the service catalog, or raise a ticket and we will route it.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#F7F9FB',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 90, searchRadius: 8, height: 360,
+    },
+    page: { heroInk: 'dark' },
+    widgets: [
+      countTile('Open requests', 'My requests', 'ticket'),
+      countTile('Approvals', 'Approvals waiting on me', 'shieldcheck'),
+    ],
+  },
+  {
+    id: 'employeecenter', name: 'Employee Center', orientation: 'horizontal', from: '4p',
+    note: 'A wide photographic welcome sized to sit above a row of category shortcuts.',
+    hero: {
+      heading: 'Welcome back, Yash',
+      sub: 'Report a fault, request a service, or find the answer yourself.',
+      bgKind: 'image', headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: false, height: 360,
+    },
+  },
+  {
+    id: 'servicecenter', name: 'Service Center', orientation: 'horizontal', from: '4a', hasImage: true,
+    note: 'A dark announcement panel with the picture beside it — the band leads with the news.',
+    hero: {
+      heading: 'Hi Yash, welcome to the Support Center',
+      sub: 'Raise a ticket, request a service, or read what is going on this week.',
+      bgKind: 'color', bannerStyle: 'gradient', bannerColor: '#0B2545',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 100, searchRadius: 6, height: 480,
+    },
+  },
+  {
+    id: 'bulletin', name: 'Bulletin', orientation: 'horizontal', from: '3j',
+    note: 'The tallest search-first band — one question, one field, and room to breathe.',
+    hero: {
+      heading: 'Find the help you need, in one search.',
+      sub: 'Search the knowledge base and the service catalog, or raise a ticket and we will route it.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#F7F9FB',
+      headingColor: '#0B2545', contentAlign: 'left', contentMaxWidth: 70,
+      showSearch: true, searchWidth: 75, searchRadius: 8, height: 480,
+    },
+    page: { heroInk: 'dark' },
+  },
+  {
+    id: 'counter', name: 'Counter', orientation: 'horizontal', from: '3c',
+    note: 'A full brand-colour band with the title set large on the left and the search opposite.',
+    hero: {
+      heading: 'Welcome to Support Portal',
+      sub: 'Priority incidents are routed to second line automatically.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#1F6FD0',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 45, searchRadius: 12, height: 480,
+    },
+    page: { heroArt: 'counter' },
+  },
+  {
+    id: 'broadside', name: 'Broadside', orientation: 'horizontal', from: '4h', slot: 'below',
+    note: 'Centred and editorial, on a warm ground, with the counts under the search.',
+    hero: {
+      heading: 'How can we help you today?',
+      sub: 'Report a fault, request a service, or read your way to the answer.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#F5F1E8',
+      headingColor: '#3B2A1A', contentAlign: 'center', contentMaxWidth: 70,
+      showSearch: true, searchWidth: 60, searchRadius: 0, height: 480,
+    },
+    page: { heroInk: 'dark' },
+    widgets: [
+      countTile('Open requests', 'My requests', 'ticket'),
+      countTile('Approvals', 'Approvals waiting on me', 'shieldcheck'),
+      countTile('Assets & CIs', 'My assets', 'laptop'),
+    ],
+  },
+  {
+    id: 'helpdesk', name: 'Help Desk', orientation: 'horizontal', from: '4a2',
+    note: 'The classic service-desk front door: one centred question over a deep solid ground.',
+    hero: {
+      heading: 'How can we help you?',
+      sub: 'Search solutions, services, announcements and requests.',
+      bgKind: 'color', bannerStyle: 'flat', bannerColor: '#274472',
+      headingColor: '#FFFFFF', contentAlign: 'center', contentMaxWidth: 70,
+      showSearch: true, searchWidth: 75, searchRadius: 4, height: 480,
+    },
+  },
+
+  /* ── Vertical: the band stops being a strip across the top and becomes a column ─────── */
+  {
+    id: 'frontdesk', name: 'Front Desk', orientation: 'vertical', from: '4f',
+    note: 'A full-height counter down the side, with everything you own beside it.',
+    hero: {
+      heading: 'Welcome to Support Portal',
+      sub: 'Report a fault, request a service, or reset your account. No appointment needed.',
+      note: 'Counter staffed Mon–Fri, 09:00–17:00',
+      bgKind: 'color', bannerStyle: 'gradient', bannerColor: '#1E3050',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      searchWidth: 100, searchRadius: 10, height: 560,
+    },
+    page: { heroPlacement: 'left', heroWidth: 380, quickLook: 'rail', heroSticky: true, heroArt: 'rings' },
+  },
+  {
+    id: 'halfdeck', name: 'Half Deck', orientation: 'vertical', from: '4g',
+    note: 'The band takes half the page — a full-bleed welcome with your work beside it.',
+    hero: {
+      heading: 'Welcome to the Support Portal',
+      sub: 'Report a fault, request a service or reset your account.',
+      bgKind: 'color', bannerStyle: 'gradient', bannerColor: '#152A4A',
+      headingColor: '#FFFFFF', contentAlign: 'left', contentMaxWidth: 100,
+      showSearch: true, searchWidth: 92, searchRadius: 6, height: 560,
+    },
+    /* ⚠️ Half the page, not a rail — same archetype, a different measure. `heroWidth` is what
+       makes that one number rather than a second layout branch. */
+    page: { heroPlacement: 'left', heroWidth: 640, quickLook: 'rail', heroArt: 'shapes' },
+  },
+];
+
+export const bannerLayout = (id: string | undefined) =>
+  BANNER_LAYOUTS.find((l) => l.id === id);
+
+/** What the picker OFFERS. A page that already has content is not restructured into two columns
+ *  by a control that looks like a style choice, so vertical is a from-scratch option only. */
+export const bannerLayoutsFor = (blankPage: boolean) =>
+  BANNER_LAYOUTS.filter((l) => blankPage || l.orientation === 'horizontal');
+
+/* ── Banner STARTING SHAPES ────────────────────────────────────────────────
+ *
+ * The replacement for `BANNER_LAYOUTS`. A layout was a finished banner you picked and could not
+ * rearrange; a shape is only a STARTING POINT — it builds the banner's section tree, already filled
+ * with real blocks, and from then on the banner is edited like any other section.
+ *
+ * ⚠️ READY-FILLED, not empty drop spaces: an admin is not a designer, and a banner that lands
+ * complete only asks them to replace what they do not want.
+ * ⚠️ Switching shape KEEPS content: blocks of the same type move into the new shape, and a block
+ * the new shape has no place for goes into a row of its own at the foot of the banner rather than
+ * being deleted (`applyBannerShape` in the builder).
+ * Background stays the banner's own setting — a shape is an arrangement, not a colour. */
+export type ShapeNode =
+  | { dir: 'row' | 'column'; weight?: number; children: ShapeNode[] }
+  | { el: string; weight?: number; cfg?: Record<string, unknown> };
+
+export interface BannerShape {
+  id: string;
+  name: string;
+  /** One line on when to reach for it. */
+  note: string;
+  /** A reference template that uses this arrangement. */
+  seen: string;
+  orientation: 'horizontal' | 'vertical';
+  tree: ShapeNode;
+  /** Written onto the hero's config — alignment only. */
+  hero?: Record<string, unknown>;
+}
+
+/* Heading and subheading are SEPARATE blocks, so each can be dragged into a row of its own. */
+const HEADING: ShapeNode = { el: 'bn-heading' };
+const SUB: ShapeNode = { el: 'bn-subheading' };
+const SEARCH: ShapeNode = { el: 'bn-search' };
+const actionCard = (title: string, sub: string, icon: string, destination: string): ShapeNode =>
+  ({ el: 'x-action-card', cfg: { title, sub, icon, destination } });
+
+export const BANNER_SHAPES: BannerShape[] = [
+  {
+    id: 'text', name: 'Text only', orientation: 'horizontal', seen: '3b2 without its card',
+    note: 'Heading, subheading and search — the simplest start.',
+    tree: { dir: 'column', children: [HEADING, SUB, SEARCH] },
+    hero: { contentAlign: 'left' },
+  },
+  {
+    id: 'text-block', name: 'Text + block', orientation: 'horizontal', seen: '3b2 · 3g · 5a · 4b',
+    note: 'Text on the left, one block beside it — an announcement carousel to start.',
+    tree: { dir: 'row', children: [
+      { dir: 'column', weight: 3, children: [HEADING, SUB, SEARCH] },
+      { el: 'c-announcements', weight: 2, cfg: { display: 'carousel' } },
+    ] },
+    hero: { contentAlign: 'left' },
+  },
+  {
+    id: 'text-photo', name: 'Text + photo', orientation: 'horizontal', seen: '8a · 8b · 4a',
+    note: 'Text on the banner colour, a picture in the other half.',
+    tree: { dir: 'row', children: [
+      { dir: 'column', weight: 1, children: [HEADING, SUB, SEARCH] },
+      { el: 'v-image', weight: 1 },
+    ] },
+    hero: { contentAlign: 'left' },
+  },
+  {
+    id: 'text-row', name: 'Text over a row of blocks', orientation: 'horizontal', seen: '2a · 7c',
+    note: 'Text on top, the four action cards in a row underneath.',
+    tree: { dir: 'column', children: [
+      HEADING, SUB, SEARCH,
+      { dir: 'row', children: [
+        actionCard('Report an Incident', 'Something is broken', 'ticket', 'incident'),
+        actionCard('Request Service', 'Browse the catalog', 'cart', 'service'),
+        actionCard('AD Self Service', 'Reset your password', 'key', 'ad'),
+        actionCard('Knowledge', 'Browse articles', 'book', 'knowledge'),
+      ] },
+    ] },
+    hero: { contentAlign: 'left' },
+  },
+  {
+    id: 'centred', name: 'Centred', orientation: 'horizontal', seen: '6a Gazette',
+    note: 'Heading and search in the middle of the banner.',
+    tree: { dir: 'column', children: [HEADING, SUB, SEARCH] },
+    hero: { contentAlign: 'center' },
+  },
+  {
+    id: 'text-search-row', name: 'Text + search row', orientation: 'horizontal', seen: '8a Vault',
+    note: 'Heading beside a picture, the search in its own row underneath.',
+    tree: { dir: 'column', children: [
+      { dir: 'row', children: [{ dir: 'column', children: [HEADING, SUB] }, { el: 'v-image' }] },
+      SEARCH,
+    ] },
+    hero: { contentAlign: 'left' },
+  },
+];
+
+export const bannerShape = (id: string | undefined) => BANNER_SHAPES.find((s) => s.id === id);
+
+export const RECORD_MODULES: RecordModule[] = [
+  {
+    key: 'request', label: 'Requests',
+    statuses: ['Open', 'In Progress', 'Pending', 'On Hold', 'Resolved', 'Closed'],
+    rows: [
+      { id: 'INC-178', title: 'Password reset required', status: 'Pending', meta: 'Raised 05 Aug 2026' },
+      { id: 'INC-170', title: 'Laptop slow and lagging', status: 'In Progress', meta: 'Raised 04 Aug 2026' },
+      { id: 'SR-180', title: 'Employee on-boarding', status: 'Open', meta: 'Raised 05 Aug 2026' },
+    ],
+  },
+  {
+    key: 'problem', label: 'Problems', hidden: true,
+    statuses: ['Open', 'Known Error', 'Under Investigation', 'Resolved', 'Closed'],
+    rows: [
+      { id: 'PRB-4412', title: 'Recurring VPN drops on the Pune link', status: 'Under Investigation', meta: 'Network' },
+      { id: 'PRB-4390', title: 'Outlook profile corruption after update', status: 'Known Error', meta: 'End user computing' },
+    ],
+  },
+  {
+    key: 'change', label: 'Changes',
+    statuses: ['Draft', 'Submitted', 'Approved', 'Scheduled', 'Implemented', 'Closed'],
+    rows: [
+      { id: 'CHG-2091', title: 'Core switch firmware upgrade', status: 'Scheduled', meta: 'Window 16 Aug, 02:00' },
+      { id: 'CHG-2088', title: 'Exchange mailbox quota increase', status: 'Approved', meta: 'Standard' },
+    ],
+  },
+  {
+    key: 'release', label: 'Releases', hidden: true,
+    statuses: ['Planning', 'Build', 'Testing', 'Deployed', 'Closed'],
+    rows: [
+      { id: 'REL-118', title: 'ServiceOps 8.4 rollout', status: 'Testing', meta: 'Go-live 22 Aug' },
+      { id: 'REL-114', title: 'Payroll portal refresh', status: 'Deployed', meta: 'Finance' },
+    ],
+  },
+  {
+    key: 'asset', label: 'Assets',
+    statuses: ['In Use', 'In Stock', 'In Repair', 'Retired'],
+    rows: [
+      { id: 'AST-3', title: 'Dell Latitude 5440', status: 'In Use', meta: 'Laptop' },
+      { id: 'AST-12', title: 'Jabra Evolve2 65', status: 'In Use', meta: 'Headset' },
+      { id: 'AST-9', title: 'iPhone 14', status: 'In Stock', meta: 'Mobile' },
+    ],
+  },
+  {
+    key: 'ci', label: 'Configuration Items',
+    statuses: ['Operational', 'Degraded', 'Down', 'Retired'],
+    rows: [
+      { id: 'CI-104', title: 'app-prod-01', status: 'Operational', meta: 'Server' },
+      { id: 'CI-121', title: 'core-switch-b', status: 'Degraded', meta: 'Switch' },
+    ],
+  },
+  {
+    key: 'patch', label: 'Patches', hidden: true,
+    statuses: ['Missing', 'Installed', 'Ignored', 'Failed'],
+    rows: [
+      { id: 'PCH-4345', title: 'Cumulative update for Windows 11', status: 'Missing', meta: 'Critical' },
+      { id: 'PCH-4302', title: 'Chrome 128 security update', status: 'Installed', meta: 'Important' },
+    ],
+  },
+  {
+    key: 'vulnerability', label: 'Vulnerabilities', hidden: true,
+    statuses: ['Detected', 'Exploited', 'Patched', 'Accepted Risk'],
+    rows: [
+      { id: 'CVE-2024-30080', title: 'Windows MSMQ remote code execution', status: 'Exploited', meta: 'CVSS 9.8' },
+      { id: 'CVE-2024-30078', title: 'Wi-Fi driver remote code execution', status: 'Detected', meta: 'CVSS 8.8' },
+    ],
+  },
+  {
+    key: 'approval', label: 'Approvals',
+    statuses: ['Pending', 'Approved', 'Rejected'],
+    rows: [
+      { id: 'AST-13', title: 'Approval required for DESKTOP-5JPPI6F', status: 'Pending', meta: 'Requested by Keya' },
+      { id: 'SR-166', title: 'Adobe Creative Cloud licence', status: 'Approved', meta: 'Software' },
+    ],
+  },
+  {
+    key: 'knowledge', label: 'Knowledge',
+    statuses: ['Draft', 'In Review', 'Published', 'Retired'],
+    rows: [
+      { id: 'KB-4', title: 'How to reset your password', status: 'Published', meta: 'Guideline Documents' },
+      { id: 'KB-1', title: 'Connecting to company VPN', status: 'Published', meta: 'FAQs' },
+      { id: 'KB-6', title: 'Reporting a hardware fault', status: 'Published', meta: 'Guideline Documents' },
+    ],
+  },
+  {
+    key: 'task', label: 'Tasks', hidden: true,
+    statuses: ['Open', 'In Progress', 'Completed', 'Cancelled'],
+    rows: [
+      { id: 'TA-2201', title: 'Collect the returned laptop', status: 'Open', meta: 'Due 18 Aug' },
+      { id: 'TA-2194', title: 'Revoke building access', status: 'Completed', meta: 'Facilities' },
+    ],
+  },
+];
+
+export const recordModule = (key?: string) =>
+  RECORD_MODULES.find((m) => m.key === key) ?? RECORD_MODULES[0];
+
+export const PORTAL_ELEMENTS: PortalElement[] = [
+  /* ── The ServiceOps portal's own blocks, in the two groups they actually divide into ──
+   *
+   * LIVE DATA fetches from the backend and shows whatever the requester's account returns; ACTIONS
+   * are fixed destinations that never vary by user. That split is not decoration — it is why the
+   * live-data widgets have no per-row content controls and the action cards do.
+   *
+   * ⚠️ Search, Categories, My Tasks and FAQ were removed from this section. Search and FAQ still
+   * exist as elements elsewhere in the palette; My Tasks and Categories are not portal blocks this
+   * product ships. */
+  { id: 'c-requests', name: 'My Open Requests', icon: 'requests', group: 'Data', onPage: true, node: 'requests', keywords: 'tickets incidents open' },
+  { id: 'c-approvals', name: 'Pending Approvals', icon: 'approvals', group: 'Data', onPage: true, node: 'approvals', keywords: 'pending approve' },
+  { id: 'c-assets', name: 'My Assets', icon: 'assets', group: 'Data', onPage: true, node: 'assets', keywords: 'hardware devices' },
+  { id: 'c-cis', name: 'My CIs', icon: 'cis', group: 'Data', onPage: true, node: 'cis', keywords: 'configuration items cmdb' },
+  /* ⚠️ No `node` — Announcements is the one Live-data widget this page has no fixed block for; it
+     only ever exists as a placed element. It is still marked as added once one is on the page,
+     because "predefined" is decided by the GROUP (Data and Actions) rather than by owning a
+     fixed block. Reading it the other way round left this one row addable while its five neighbours
+     all greyed out. */
+  /* ⚠️ The BANNER and the SEARCH are in the palette because a from-scratch portal renders neither:
+     a blank page replaces every band with one empty state, so without these two rows the one
+     thing every reference portal opens with was the one thing you could not add.
+     ⚠️ Both carry a `node`, which is what makes them PREDEFINED — one to a page, ticked once
+     placed. Two banners is not a page anybody wants, and the search rule is the whole point.
+     ⚠️ `search` is the BANNER's search bar, not a free-standing widget. Every reference portal
+     puts it in the band, and a search floating in a section is a different product's pattern —
+     so placing it turns the banner's own field on, and it needs a banner to live in. */
+  { id: 'x-banner', name: 'Banner', icon: 'banner', group: 'Data', node: 'hero', keywords: 'hero header masthead top band' },
+  { id: 'x-search', name: 'Search', icon: 'search', group: 'Data', node: 'hero-search', keywords: 'find lookup search bar' },
+  /* `node: 'news'` — the v2 portal renders Announcements as a FIXED card (`news` in the work row), so
+     without the link the palette never ticked it while that card was on the page. */
+  { id: 'c-announcements', name: 'Announcements', icon: 'announcements', group: 'Data', node: 'news', keywords: 'news broadcast banner' },
+  { id: 'c-knowledge', name: 'Most Read Knowledge', icon: 'knowledge', group: 'Data', onPage: true, node: 'knowledge', keywords: 'articles kb most read' },
+  /* ⚠️ LIVE DATA, not Custom. Its own spec has said `group: 'Data'` all along — only the
+     PALETTE entry disagreed, and the palette is the one an admin reads. The group is not decoration
+     either: Data and Actions are the predefined groups, so moving it is what makes Contact Us
+     behave like the card it is — one instance, ticked once it is on the page. */
+  { id: 'c-contact', name: 'Contact Us', icon: 'contact', group: 'Data', node: 'contact', keywords: 'support escalate raise' },
+  /* ⚠️ NOT onPage. This is spec §7.8 Featured Services — a requester's favourites list. The page
+     carries the "Request Service" ACTION CARD, which is a different widget with a fixed
+     destination. Flagging this one as placed made Featured Services unreachable. */
+  /* ⚠️ Its own element, not a variant of Most Used Services. The two answer different questions —
+     what THIS requester pinned, versus what the whole organisation asks for most — and a single
+     widget with a source toggle would have made a page carrying both look like one widget
+     misconfigured twice. */
+  /* ⚠️ BACK in the palette, both of them, and each naming its fixed page block so the library marks
+     it as already added. They were hidden in task 22 on the reasoning that a requester fills them,
+     so an admin should not be placing them — but that reasoning argued for a NOTE, not an absence:
+     an admin can reasonably decide whether the page carries a favourites row at all, and hiding the
+     row only meant that once it was deleted there was no way to get it back. Favourite Services
+     carries the note saying it stays invisible until a requester has favourites. */
+  /* ⚠️ LIVE DATA, not Custom. Both are fed by the backend — one from what this requester pinned, the
+     other from what the organisation asks for most — which is the line Data draws. They sat in
+     Custom because they were written before that split existed.
+     Their `node` stays: it is what lets the palette see them on the page, since both are top-level
+     BANDS rather than members of a row. */
+  { id: 'c-favourites', name: 'Favourite Services', icon: 'services', group: 'Data', node: 'favourites', keywords: 'pinned starred saved shortcuts' },
+  { id: 'c-services', name: 'Most Used Services', icon: 'services', group: 'Data', node: 'services', keywords: 'catalog request service favourites featured' },
+  /* Placed: the FAQ block already sits in the banner area of this portal, so the palette shows it
+     as added rather than offering a second one. */
+  { id: 'c-faq', name: 'FAQ', icon: 'faq', group: 'Custom', onPage: true, keywords: 'questions help answers' },
+  /* ⚠️ CUSTOM, not Data — and that placement does real work. Data and Actions are
+     group-gated as predefined: one instance each, greyed with a tick once placed. This one is
+     repeatable, which is exactly what it needs — two Record Lists filtered differently is a
+     reasonable page, and the whole point is that the admin asks the question. */
+  { id: 'c-records', name: 'Custom Data Widget', icon: 'records', group: 'Custom', keywords: 'list records kpi count metric requests assets cis filter module query data' },
+
+  // ── Actions — fixed destinations, the same for every requester ──
+  /* ⚠️ The four action cards are BACK in the palette. Hiding them was the wrong answer to a real
+     problem: they are the Quick Actions row's four fixed destinations, so a fifth copy has nowhere
+     legal to land — but a palette that silently drops four rows makes the admin wonder where the
+     New Incident card went. Present-and-marked-as-added says the same thing and answers the
+     question at the same time.
+     Each names its `node`, so the mark reads the LIVE page: remove AD Self Service from the row and
+     its row becomes addable again. */
+  { id: 'act-incident', name: 'New Incident', icon: 'incident', group: 'Actions', onPage: true, node: 'quick-incident', keywords: 'report issue raise ticket' },
+  { id: 'act-service', name: 'Request Service', icon: 'services', group: 'Actions', onPage: true, node: 'quick-service', keywords: 'catalog order' },
+  { id: 'act-ad', name: 'AD Self Service', icon: 'adself', group: 'Actions', node: 'quick-ad', keywords: 'password reset domain unlock' },
+  { id: 'act-knowledge', name: 'Knowledge', icon: 'knowledge', group: 'Actions', onPage: true, node: 'quick-knowledge', keywords: 'articles help search' },
+  /* The four cards as ONE block with a 1–4 column preset. Placing it moves the Quick Actions row's cards into it. */
+  /* ⚠️ HIDDEN from the palette (21 Sep 2026), with the single Action Card taking its place. A block
+     that holds N cards and a card you add N times are two answers to one question, and the block
+     forced a decision — how many, in what column count — before you had seen one on the page.
+     It STAYS in the catalogue: the banner templates place it (its `actions()` piece), the banner's
+     own "+" still offers it through `BANNER_SIDE_WIDGETS`, which bypasses this flag, and a page
+     already carrying one keeps rendering and editing exactly as before. */
+  { id: 'x-actions', name: 'Action cards', icon: 'actionCard', group: 'Actions', onPage: true, hidden: true, keywords: 'quick actions cards incident service knowledge ad' },
+
+  { id: 'l-tabs', name: 'Advanced Tabs', icon: 'tabs', group: 'Basic', hidden: true }, // hidden 20 Aug 2026
+  /* Back in the palette. It was withheld on 21 Aug with no reason recorded — and unlike Spacer and
+     Advanced Tabs it has a complete spec, a renderer and a preview card, so there was nothing to
+     finish. What it DID have was a lie in its panel: three of the six line styles could not render.
+     Fixed in `DividerRender` (see the note there) rather than by trimming the picker. */
+  { id: 'l-divider', name: 'Divider', icon: 'divider', group: 'Basic', keywords: 'vertical horizontal v/h separator rule line' },
+
+  /* ⚠️ File Download, Click to Call, Click to Mail and Share are NOT here. They are Button
+     ACTIONS (§7.11's 'Opens' list), not elements — one button with a different destination. A
+     separate palette entry for each was two ways to make the same link.
+     x-search was a DUPLICATE of c-search under Custom; two identically named entries is a coin
+     flip for whoever uses it. */
+  /* ⚠️ Large Title, Small Title and List are HIDDEN, not deleted — their specs and renderers are
+     still here because the Text element is absorbing those features into its own content. Deleting
+     them would take the working code with them; hiding them stops the palette offering two ways to
+     write a heading while that move is in flight.
+     Countdown, Photo Gallery, Icon and Shape were REMOVED from the palette outright. */
+  // ── Basic ──
+  { id: 'b-text', name: 'Text', icon: 'text', group: 'Basic', keywords: 'paragraph body copy' },
+  { id: 'b-button', name: 'Button', icon: 'button', group: 'Basic', keywords: 'cta link action' },
+  { id: 'b-spacer', name: 'Spacer', icon: 'spacer', group: 'Basic', keywords: 'gap whitespace', hidden: true }, // hidden 20 Aug 2026
+  { id: 'b-table', name: 'Table', icon: 'table', group: 'Basic', keywords: 'grid rows columns data' },
+  /* Withheld: FAQ is the same widget under a name that says what it is for, and the two were
+     edited the same way after the Sep 2026 pass — one shape, two palette rows. Spec and renderer stay,
+     so any page already carrying one keeps working. */
+  { id: 'b-accordion', name: 'Accordion', icon: 'accordion', group: 'Basic', hidden: true, keywords: 'collapse faq expand' },
+  { id: 'b-text-image', name: 'Text with Image', icon: 'textImage', group: 'Basic', keywords: 'media split', hidden: true },
+  /* ⚠️ HIDDEN, not deleted — the spec, the renderer and the panel all stay, so a page already
+     carrying a Card keeps working and restoring the row is one word. */
+  { id: 'b-card', name: 'Card', icon: 'card', group: 'Basic', hidden: true, keywords: 'tile panel' },
+
+  // ── Visual ──
+  { id: 'v-image', name: 'Image', icon: 'image', group: 'Visual', keywords: 'picture photo' },
+  { id: 'v-video', name: 'Video', icon: 'video', group: 'Visual', keywords: 'youtube vimeo mp4 embed player clip' },
+  /* Un-hidden once its controls were made real — see PortalCarousel.tsx. It was withheld because
+     22 of its 33 controls did nothing; the panel is now one Type control plus fields that all
+     paint, so the reason for hiding it is gone rather than merely overruled. */
+  { id: 'v-slider', name: 'Media Slider', icon: 'slider', group: 'Visual', keywords: 'carousel gallery swipe slideshow' },
+
+
+  // ── Custom ──
+  /* ⚠️ BACK in the palette (21 Sep 2026), and it is now the ONLY way to put an action card on the
+     page — the block that held four of them is hidden instead. The 24 Aug note said a card belongs
+     inside the Quick Actions row rather than standing alone; what replaced that is a card that
+     GATHERS: the second one lands beside the first and the row builds itself (see `GATHERING`).
+     One card, added as many times as you want, is the row without having to choose its shape first. */
+  /* ⚠️ HIDDEN from the palette, and still offered by the BANNER's "+" — that list renders its own
+     rows and does not read this flag. These two belong to the banner: an action card is one of the
+     product's four destinations and a KPI is a counter beside the words, and neither is a block
+     somebody drops into the middle of a page on its own. */
+  { id: 'x-action-card', name: 'Action Card', icon: 'actionCard', group: 'Custom', hidden: true, keywords: 'quick action tile' },
+  /* ⚠️ HIDDEN, not deleted. The KPI is now a DISPLAY MODE of the Custom data widget rather than a
+     widget of its own — the two asked the same question (which records?) and answered it in two
+     shapes, so an admin had to know which they wanted before they could pick a module. Its spec,
+     its renderer and its panel all stay, so a page already carrying a placed KPI keeps working and
+     editing exactly as it did. */
+  /* ⚠️ BACK too, and for the same reason: one counter, added one at a time, gathering into its own
+     row. The 24 Aug note hid it as a duplicate of the Custom Data Widget's KPI display — that widget
+     answers "which records?" and draws a number; this is a number you place and label yourself. */
+  { id: 'x-kpi', name: 'KPI', icon: 'kpi', group: 'Custom', hidden: true, keywords: 'metric stat number' },
+  /* A SET of counters with a 1–4 column preset — the banner's KPI block. */
+  /* ⚠️ HIDDEN for the same reason as Action cards, and on the same day — the single KPI replaces it.
+     Still placed by the banner templates and still offered by the banner's own "+". */
+  { id: 'x-kpis', name: 'KPI tiles', icon: 'kpi', group: 'Custom', hidden: true, keywords: 'metric stat number counters kpi' },
+  /* One card, five shapes — the promo, the help block and the list of links a portal needs and had no
+     element for. Repeatable: two of them side by side is a normal page. */
+  { id: 'x-card', name: 'Custom Card', icon: 'customCard', group: 'Custom', keywords: 'card promo banner image links cta button heading subtitle' },
+  /* An empty cell on the banner, made by its + adders; it becomes whatever is picked into it. */
+  { id: 'bn-slot', name: 'Empty slot', icon: 'card', group: 'Basic', hidden: true },
+  /* ⚠️ The banner's own two blocks. Hidden from the palette — they only exist ON a banner, where the
+     banner's "+" offers them — but catalogue entries all the same, so a placed one has a name. */
+  { id: 'bn-heading', name: 'Heading', icon: 'text', group: 'Basic', hidden: true },
+  { id: 'bn-subheading', name: 'Subheading', icon: 'text', group: 'Basic', hidden: true },
+  { id: 'bn-search', name: 'Search', icon: 'search', group: 'Basic', hidden: true },
+  { id: 'b-list', name: 'Quick links', icon: 'list', group: 'Basic', hidden: true },
+];
+
+/* ── PREDEFINED vs OTHER ────────────────────────────────────────────────────
+ *
+ * The one rule both the palette and the canvas's own Add/Replace pickers read.
+ *
+ * ⚠️ PREDEFINED is a GROUP rule, not a fixed-block rule. **Data** and **Actions** are the product's
+ * own single-instance widgets — one My Open Requests, one Request Service — and a section carrying
+ * one is committed to it: nothing else may join it and the only change left is swapping it for
+ * another predefined widget. Everything in **Basic, Visual and Custom** is repeatable by design, may
+ * sit several to a section, and swaps only for its own kind.
+ * ⚠️ Gating on `node` alone was too narrow: Announcements is Data with no fixed page block, so it
+ * could never be counted however many copies the page carried. The two service rows keep their
+ * `node` because they sit in Custom, where the group rule does not reach — they are the exception
+ * the flag exists for. */
+export const isPredefinedElement = (e: PortalElement) =>
+  e.group === 'Data' || e.group === 'Actions' || !!e.node;
+
+/** The same question asked of a catalogue id, which is what the canvas has to hand. */
+export const isPredefinedType = (type: string) => {
+  const e = PORTAL_ELEMENTS.find((x) => x.id === type);
+  return !!e && isPredefinedElement(e);
+};
+
+
+/* ── Helpers ─────────────────────────────────────────────────────────────── */
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/** 'Wed, Aug 12, 2026 10:09 AM' — the stamp format every list in this product uses. */
+export function formatPortalStamp(d: Date): string {
+  const h = d.getHours();
+  const hh = ((h + 11) % 12) + 1;
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  return `${DAYS[d.getDay()]}, ${MONTHS[d.getMonth()]} ${String(d.getDate()).padStart(2, '0')}, ${d.getFullYear()} ${String(hh).padStart(2, '0')}:${mm} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+/** Next free `SPP-#`, so ids stay stable and readable as pages come and go. */
+export function nextPageId(pages: PortalPage[]): string {
+  const max = pages.reduce((n, p) => {
+    const m = /^SPP-(\d+)$/.exec(p.id);
+    return m ? Math.max(n, Number(m[1])) : n;
+  }, 0);
+  return `SPP-${max + 1}`;
+}
+
+/** 'New page', then 'New page 2'… — a builder must never make the admin resolve a clash. */
+export function uniquePageName(pages: PortalPage[], base: string): string {
+  const taken = new Set(pages.map((p) => p.name.toLowerCase()));
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let n = 2; ; n += 1) {
+    const candidate = `${base} ${n}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/* Live-data widgets with no records right now.
+ *
+ * ⚠️ In the real product this is a question for the data layer, not a constant — it is here because
+ * this is a prototype and the answer has to come from somewhere. What matters is that ONE place
+ * knows it, so the canvas and the panel cannot disagree about whether a widget has anything in it. */
+export const PORTAL_EMPTY_WIDGETS = new Set(['cis']);

@@ -1,0 +1,683 @@
+/* Support Portal builder — structure and chrome (spec §7.20–7.24, build step 7).
+ *
+ * The Banner, the Section, the Page, the left rail and the top bar. These differ from §7's widgets
+ * in one way that shapes everything: they are not things an admin ADDS, they are things the page
+ * already is. So none of them can be deleted from the palette's point of view, and two of them —
+ * the rail and the bar — hold destinations the product owns rather than content the admin writes.
+ */
+
+import type { WidgetField, WidgetSpec } from './portalWidgetSpec';
+
+/* ── §7.20 Banner ────────────────────────────────────────────────────────── */
+
+/* §7.20's search sub-element — its own layer, so clicking the search bar edits the SEARCH.
+ *
+ * ⚠️ It writes the BANNER's config keys (ownerOf strips -search), because there is one search
+ * and one set of settings for it. Two stores would let the banner's "Show the search bar" and this
+ * panel's disagree about whether there is a search at all.
+ * ⚠️ "Show the search bar" USED to be repeated here, on the reasoning that it is the same control in
+ * the place you are standing when you decide you do not want it. Removed on request: the panel is
+ * the placeholder and nothing else, and hiding the search is done from the banner. */
+export const SEARCH_SPEC: WidgetSpec = {
+  id: 'search', name: 'Search', group: 'Structure', reuse: 'single', family: 'flat',
+  panel: {
+    /* ⚠️ ONE field. Scope and Suggestions describe what the search ENGINE does — the product's
+       answer, not this page's. Show-the-search-bar went too: it is the one control here that is not
+       about the search at all, it decides whether the banner HAS one, and it already exists on the
+       Hero's panel. ⚠️ The consequence, stated because it is a real cost: hiding the search now
+       means selecting the BANNER, not the search bar you are looking at. */
+    content: [
+      { key: 'searchPlaceholder', label: 'Placeholder', control: 'text' },
+    ],
+    accordions: [
+      {
+        id: 'style', open: true,
+        fields: [
+          { key: 'searchWidth', label: 'Width', control: 'slider', min: 40, max: 100, unit: '%' },
+          { key: 'searchRadius', label: 'Corner radius', control: 'radius' },
+          /* ⚠️ The search bar is a WHITE field, and on a pale banner a white field on a near-white band has
+             no edge at all — the one control that could give it one did not exist. Colour appears once there
+             is a width to paint it, the same gate the banner's own border uses. */
+          { key: 'searchBorderWidth', label: 'Border', control: 'slider', min: 0, max: 4, unit: 'px' },
+          { key: 'searchBorderColor', label: 'Border colour', control: 'color', when: (c) => Number(c.searchBorderWidth ?? 0) > 0 },
+        ],
+      },
+      { id: 'spacing', spacing: 'both' },
+    ],
+  },
+  /* Nothing in the palette can put the banner's search back, so removing it is the toggle above. */
+  noDelete: true,
+  fields: [], packs: [],
+  defaults: { searchPlaceholder: 'How can we help you?', searchScope: 'knowledge', searchSuggestions: true, showSearch: true, searchWidth: 70, searchRadius: 4, searchBorderWidth: 0, searchBorderColor: '#DFE5ED' },
+};
+
+export const HERO_SPEC: WidgetSpec = {
+  id: 'hero', name: 'Banner', group: 'Structure', reuse: 'single', family: 'collection',
+  fields: [
+    /* ⚠️ Starting SHAPES are switched off for now (15 Sep 2026) — the regular banner is back and gains
+       its controls one at a time. The shape code (`BANNER_SHAPES`, `applyBannerShape`, the banner
+       section tree) stays; restoring the picker is this one field:
+       { key: 'bannerShape', label: '', control: 'bannerShape', group: 'Shape' } */
+    { key: 'heading', label: 'Heading', control: 'text', group: 'Content' },
+    { key: 'sub', label: 'Sub-heading', control: 'text', group: 'Content' },
+    /* ⚠️ The picture belongs to the LAYOUT that has a picture slot, not to the banner in general.
+       `slotCols` and the free-standing "picture beside the heading" both went with `bannerType`:
+       what sits beside the words is the layout's decision now, so two more controls answering the
+       same question would be two ways to disagree. This one survives because a layout can only
+       decide that there IS artwork — it cannot know which artwork, and shipping somebody else's
+       stock placeholder forever is not a design decision. */
+    {
+      key: 'sideImage', label: 'Picture beside the heading', control: 'upload', suggested: '680 × 440',
+      noun: 'picture', group: 'Content', when: (c) => c.__layoutHasImage === true,
+    } as WidgetField,
+    { key: 'showSearch', label: 'Show the search bar', control: 'toggle', group: 'Content' },
+    { key: 'searchPlaceholder', label: 'Search placeholder', control: 'text', group: 'Content', when: (c) => c.showSearch !== false },
+    /* ⚠️ FOUR named sizes, not a 120–600px slider. A banner has about four useful heights — enough
+       for a line of text, the standard band, something you notice, and a near-full screen — and the
+       slider invited a precision nobody wants: 347px is not a decision anyone made on purpose, and
+       it is a decision that has to be re-made on every portal. The values are still plain pixels
+       underneath, so the renderer is unchanged and an existing custom height keeps rendering; it
+       simply is not typed by hand any more. */
+    {
+      /* ⚠️ FIRST in the group, above Height, because it decides everything under it — the band's
+         shape, its treatment and the widgets in it. A control that reframes the ones above it is
+         read after the damage is done.
+         ⚠️ It replaced `bannerType`, which offered three abstract SHAPES and left the rest to be
+         built by hand: the shape was the least interesting part of the decision and the only part
+         it answered. A layout brings a finished banner you then edit.
+         ⚠️ A drawn picker, not a dropdown: which banner you want is recognised by looking. */
+      key: 'bannerLayout', label: 'Banner layout', control: 'bannerLayout', tab: 'style', group: 'Banner',
+      /* ⚠️ RETIRED in favour of Shape. Kept only for a page still carrying a layout from before —
+         once a shape is chosen the banner is a section tree and a finished layout cannot describe it. */
+      when: (c) => !c.bannerShape && !!c.bannerLayout && c.bannerLayout !== 'classic',
+    } as WidgetField,
+    {
+      /* ⚠️ FIRST in the group, above Height — the slot the retired `bannerLayout` picker had, and
+         for the reason written there: a control that reframes everything under it is read too late
+         at the bottom. Changing the layout replaces the band's treatment, its copy and the widgets
+         in it, so Height, Background and the rest are its consequences.
+         ⚠️ It opens the SAME picker the add flow uses, locked to the shape the page already has —
+         a vertical banner IS the page in two columns, so that question was settled when the banner
+         went on. The Banners rail keeps both shapes, which is where changing it lives. */
+      key: 'bannerTemplate', label: 'Banner layout', control: 'bannerChange', tab: 'style', group: 'Banner',
+    },
+    /* ⚠️ HEIGHT IS NOT IN THE PANEL. The band is sized by DRAGGING its bottom edge, which is the
+       one property of a banner you judge by eye against the words and the picture inside it — and
+       a rail of four fixed stops beside a handle that offers every value in between is two
+       controls for one number, where the one you did not touch last is wrong. The handle stays;
+       `height` is still read, so every template and every page already carrying one is unchanged.
+       `stepRail` and its options are gone with the field. */
+    /* ── Arrangement: how the banner's items sit — side by side or stacked — from presets that change
+       with the number of items. The gap is the space between every item, down to 0 so two can meet. */
+    /* ⚠️ Every row here needs a SECOND section to mean anything — see `__bannerSections` in the builder —
+       and each gap row needs that axis to exist. */
+    /* ⚠️ NO Layout presets group. The arrangement tiles and the column-width ratio are BOTH on the
+       banner's own floating toolbar now, in the one popup that also sets how many sections there are
+       — three parts of one decision, and the panel held two of them a scroll away from the third.
+       `bannerTree` and `bannerSplit` are unchanged and still read; only this way in is gone. */
+    /* ⚠️ Gap is not a control any more — see the note in `GapBands`. Every section keeps its resting gap. */
+    /* ⚠️ Gap is not a control any more — see the note in `GapBands`. Every section keeps its resting gap. */
+
+    /* ⚠️ Background is TWO TABS — Image or Colour — with image the default, because a banner is a
+       picture first and the colour is what you fall back to. It replaced Fill's None / Colour /
+       Image: "None" was never a real answer for a band whose whole job is to be a backdrop, and
+       having the choice in two places (here and the shared Style pack) meant the two could disagree
+       about what the band was showing. */
+    {
+      /* ⚠️ The WHOLE Background group has gone to the toolbar: the Image/Colour choice, the picture
+         itself, the fill editor, and the colour layer over the image. Every one of them is judged by
+         eye against the band it paints — a gradient stop dragged in a panel is the copy you are not
+         looking at — and the bar already had a colour button and an image button, so the panel was
+         the second door to both rooms. The bar's image button opens the picture AND its colour layer
+         together, which is the pair you actually work on at once.
+         Keys unchanged and still read: `bgKind`, `bannerImage`, `bannerColor`, `colorMode`,
+         `bannerGradient`, `overlayOn`, `overlayMode`, `overlayColor`, `overlayGradient`. */
+      key: '__bgGone', label: '', control: 'text', tab: 'style', group: 'Background', when: () => false,
+    },
+
+
+    /* ⚠️ "Also use behind the whole page" is GONE, from the panel and from the canvas toolbar at the
+       same time. It put one BLOCK in charge of the whole page's background — a change you make while
+       looking at the banner and then find everywhere else — and the page already has its own
+       background in Theme, which is where a page-wide decision belongs. The `bgWholePage` key and
+       the renderer branch that reads it stay, so a portal that had it on still renders that way;
+       nothing sets it any more. */
+    /* Removed on request: Stretch to the page edges, Content max width, Heading colour, and with the
+       colour gone the Contrast guard that measured it — and later Image fit, Focal point and Darken
+       for text. ⚠️ "Tile the image" went with them rather than being kept: it was gated on Image fit
+       being "Original size", so with that control gone it could never appear again — a field nothing
+       can reveal is worse than an absent one, because it reads as a bug to whoever finds it in the
+       spec. The renderer still reads the same cfg keys and the DEFAULTS below still declare them,
+       so each falls back to its default and the band looks exactly as it did — cover, centred,
+       unshaded. Putting any of them back is one line here, not a rebuild. */
+    /* ── The colour layer over an image ─────────────────────────────────────────────────────────
+       ⚠️ ON by default the moment a banner has a picture: text laid straight onto a photograph is
+       readable only by luck. It sits BETWEEN the image and the words, strongest at the side the words
+       are on, and fades out so the photograph still shows where there is nothing to read. */
+
+    /* Solid (one colour, its opacity in the picker) or Gradient (type, angle and stops) — see OverlayLayerEditor. */
+
+    /* ⚠️ NO Alignment group and NO Corners-&-border group. Both are on the banner's own floating
+       toolbar — the two align popups it always had, and now a Border and a Corner-radius button
+       beside them. A banner is the one block you never look away from while you are styling it,
+       so every one of these is judged by eye against the picture and the words inside it; a
+       slider in a panel is the copy you are not looking at, and it wins the last write.
+       Every key is unchanged and still read — `contentAlign`, `contentAlignY`, `bannerRadius`,
+       `bannerBorderWidth`, `bannerBorderColor`, `bannerBorderStyle` — so no banner moved. */
+    /* ⚠️ NO Search group. Width and corner radius were the whole of it, and both are answered
+       better elsewhere: the field's width is dragged with the Text & Search section it belongs to,
+       and its radius is the theme's button radius — a portal whose search corners disagree with its
+       buttons reads as two designs. Both keys are still READ (`searchWidth`, `searchRadius`), so
+       every template and every page already carrying a value renders exactly as before. */
+  ],
+  /* ⚠️ NO P1. That pack opens with Fill (None / Colour / Image), which is the same question the
+     Background tabs above already ask — two controls for one value, and the loser is whichever you
+     did not touch last. The banner keeps its border, radius and spacing through its own rows. */
+  packs: [],
+  /* §7.20 — nothing in the palette can put a banner back, so Duplicate and Delete would be a
+     one-way door. The overflow carries Move up / Move down / Reset to default only. */
+  noDelete: true,
+  /* ⚠️ No Parts collection. The heading, sub-heading and search bar are each wrapped in <Sel> on
+     the canvas, so they are reached by clicking the words themselves — a list of them here was a
+     second route to the same three places, and it was the only "collection" in the file with
+     nothing to add, reorder or delete. */
+  defaults: {
+    heading: 'Welcome to Support Portal',
+    sub: 'Search our support center knowledge base',
+    showSearch: true,
+    searchPlaceholder: 'How can we help you?',
+    fullBleed: false,
+    height: 260, contentAlign: 'center', contentMaxWidth: 70,
+    bgKind: 'image', bannerColor: '#3D8BD0', bgWholePage: false,
+    bannerFit: 'cover', bannerPos: 'center', bannerRepeat: false, bannerShade: 0,
+    /* No overlaySide default: until one is picked the layer is strongest on the side the TEXT is on (see bannerLayerSide). */
+    overlayOn: true, overlayFrom: 'rgba(15, 23, 42, 0.85)', overlayTo: 'rgba(15, 23, 42, 0)',
+    contentAlignY: 'center', bannerRadius: 0, bannerBorderWidth: 0, bannerBorderColor: '#E5E7EB', bannerBorderStyle: 'solid',
+    headingColor: '#FFFFFF', searchWidth: 70, searchRadius: 4, bannerSplit: 'auto',
+    // §7.20's search sub-element.
+    searchScope: 'knowledge', searchSuggestions: true,
+  },
+};
+
+/** L6 — the Search bar's own drawer. Reached by selecting the search field on the canvas. */
+/* ⚠️ `HERO_SEARCH_FIELDS` was deleted here. It described the search panel and NOTHING read it —
+   the panel comes from `SEARCH_SPEC.panel.content` above — so it was a second definition of one
+   screen, and the obvious place to make an edit that would have no effect. */
+
+/* ── §7.21 Section ───────────────────────────────────────────────────────── */
+
+export const SECTION_SPEC: WidgetSpec = {
+  id: 'section', name: 'Section', group: 'Structure', reuse: 'many', family: 'container',
+  /* The accordion model. ⚠️ NO Typography — a section has no type of its own; its children carry
+     the text. And the STYLE accordion is three mutually exclusive fills, not a pile of always-on
+     rows: None hides everything, Colour shows background + border + radius, Image shows the upload
+     with border + radius only. Fields that do not apply are removed, never greyed. */
+  panel: {
+    content: [
+      /* ⚠️ The "External link card" CTA is WITHHELD, not deleted — the pattern this file already
+         follows for `PORTAL_TEMPLATES`/`VISIBLE_TEMPLATES` and `RECORD_MODULES`. Quick Actions is
+         the product's four destinations, and a fifth card an admin points anywhere is a different
+         kind of thing sitting in a row that reads as one set.
+         ⚠️ Everything BEHIND it stays and still works: the `act_link` spec, the `quick-link` node,
+         `addLinkCard` in the builder and `__hasLink`/`LINK_CARD_ID`. A page that already carries a
+         link card — or a future template seeding one into `rowOrder.quick` — renders, selects and
+         edits it exactly as before; there is simply no longer a control that mints a new one.
+         Putting it back is restoring the one line below, not a rebuild.
+         The generic Action Card element in the palette is still the way to add a card that points
+         wherever you like — it lands in its own section rather than inside the locked row. */
+      // { key: '__addLink', label: '', control: 'addLinkCard', when: (c) => c.__quickRow === true },
+      /* ⚠️ NO Name field. It was editor-only — "Only you see this" — and NOTHING read it: the hover
+         chip, the breadcrumb and the drawer title all take their words from `nodeById`, which
+         hard-codes them, which is why the panel says "Cards Row / Section" whatever you typed. A
+         text box that changes nothing anywhere, sitting first in the panel above the controls that
+         do. ⚠️ Columns never had one, so nothing nested is affected: `sec-N-cM` resolves to
+         `COLUMN_SPEC`, which is fields-only and has no Content section at all.
+         Card templates is chosen HERE, on the parent, so every card in the row shares a shape. A
+         row of cards that do not agree reads as an accident, which is why the card has no Layout
+         accordion. */
+      /* ⚠️ Card templates is NOT here any more — it lives on each action card's own panel.
+         It sat on the parent so every card in a row would share a shape, and a row of cards that do
+         not agree does read as an accident. Per-card is the deliberate trade: the row can now hold
+         four different shapes, and whoever builds it owns that. The section's `cardTemplate` default
+         below stays, because the renderer still falls back to it for a card that has never been
+         given one — so an untouched row still comes out uniform. */
+    ],
+    /* ⚠️ Layout and Size are gone from the SECTION as well, for the same reason they left the widget
+       drawer: the column adders on the canvas set the count, the drag handles set the height, and a
+       panel copy of either meant two controls for one value. The gap survives inside Layout nowhere
+       — it moved out with the accordion, because a row's gap is visible on the canvas the moment you
+       change a column and nobody reaches for a slider to find it.
+       ⚠️ Shadow is gone too. It was one toggle producing one fixed drop shadow on a band that spans
+       the page — an effect nobody was asking a full-width section for, sitting in the same list as
+       the fill that actually changes how the page reads. */
+    accordions: [
+      /* ⚠️ Layout is BACK on the section, because it now does something. It left when its only rows
+         were a column count the canvas already set and an alignment nothing read; what replaces it
+         is a preset row that rewrites the section's shape and reflows its contents, with the two
+         alignment rows underneath following whichever axis that shape produced. */
+      {
+        id: 'layout', open: true,
+        /* ⚠️ NO Behaviour row. The Row/Column control that decided which way a section lays its
+           children out is off the panel across the whole module — removed 25 Aug. The tree model
+           behind it stays (`Box.dir`, `splitBox`, the axis-aware adders), so nothing on the canvas
+           changed and putting the control back is one field; it simply is not a panel decision
+           while the section work is parked. */
+        fields: [
+          { key: 'preset', label: 'Presets', control: 'sectionPreset', when: (c) => Number(c.__count ?? 0) >= 1 },
+          /* ⚠️ On the PARENT, not on each column — the same reason Card templates sits here. How a
+             row redistributes is a property of the row: two columns in one section answering that
+             question differently is not a layout, it is an argument. Every section gets it, empty
+             ones included, because a section's first column is resizable the moment it exists.
+             ⚠️ Switching modes CLEARS the widths already dragged onto this section's columns (see
+             `patchCfg` in the builder). Fill stores a share of the row and Fixed stores a width of
+             its own; a value left behind by the other mode is read by the wrong rule, which collapses
+             or overflows the row. Redistributing is also the honest answer to "what does this row do
+             now" — you changed the rule it distributes by. */
+          { key: 'resize', label: 'Responsive behaviour', control: 'select',
+            options: [
+              { value: 'fill', label: 'Fill items' },
+              { value: 'fixed', label: 'Fixed items' },
+            ],
+            info: 'Fill — dragging one column re-flows its siblings so the row always fills the section. Fixed — every column keeps its own width, and dragging one leaves the others exactly where they are.' },
+          /* Figma's spacing pair: the gap between the section's columns and between its rows. */
+          /* ⚠️ Gap is not a control any more — see the note in `GapBands`. Every section keeps its resting gap. */
+          /* ⚠️ NO Content alignment, on ANY section — the cards row, the side rail, the work cards and
+             every custom section alike. It was already withheld on the bands of data cards, and the
+             reason given there turns out to be the reason everywhere: a section's columns FILL it.
+             Whether they are four equal cards or two dragged to 2:1, the row has no free space left
+             for an alignment to distribute, so every option but the default moved nothing — two rows
+             of eight icon buttons reporting a layout that does not exist.
+             The questions a section actually has are answered above it: how many columns (the preset
+             row), how wide (the column drags), and how far apart (Gap).
+             ⚠️ `distribute` and `valign` are still READ by the preview (`secBox`), so a section that
+             stored one keeps the layout it has — the controls are gone, the values are not. */
+        ],
+      },
+      {
+        id: 'style',
+        fields: [
+          /* ⚠️ NO Image fill — None and Colour only, the same two P1 already offers everywhere else.
+             A background photograph behind a card or a band is not a fill, it is artwork: it needs a
+             crop, a focal point and a contrast guard to stay readable, and a segmented control can
+             offer none of the three. Where a picture genuinely belongs — the banner, an action
+             card's icon slot — it has its own field that does all three properly.
+             ⚠️ `bgImage` stays in `defaults` and the renderer still reads it, so anything already
+             carrying one keeps drawing it; there is simply no longer a way to set one here. */
+          /* ⚠️ Fill and Background colour moved to the floating toolbar's colour button — see the note
+             in the P1 pack. The keys are unchanged (`fill` / `bg`, painted by `fillCss`), so anything
+             already carrying a background keeps it; there is simply no longer a field here. */
+          /* ⚠️ Border and Corner radius moved to the floating toolbar beside the colour button, which
+             empties this Style group the way it emptied P1. The keys are unchanged (`borderWidth`,
+             `borderColor`, `borderStyle`, `radius`, painted by `fillCss`). */
+        ],
+      },
+      { id: 'spacing', spacing: 'both' },
+      /* ⚠️ There is NO separate Alignment accordion any more. It held the same two rows Layout
+         holds, writing the same two keys — so a section had two Content-alignment controls that
+         could show different things depending on which one you had touched last. They belong with
+         the preset, because the preset is what decides which axis the words even refer to. */
+    ],
+  },
+  noDelete: true,
+  fields: [], packs: [],
+  /* ⚠️ NO cols/padTop/padBottom default — a spec default is shared by EVERY section, and the bands
+     do not share a column count. Seeded per node in the builder instead. */
+  /* ⚠️ `bg` needs a default of its own. Without one the panel's colour field fell back to its
+     control default while the canvas fell back to white — so the swatch said one colour and the
+     band painted another, and the fill looked broken when it was only unset. */
+  defaults: { cardTemplate: 'left', resize: 'fill', colGap: 16, fill: 'none', bg: '#FFFFFF', borderWidth: 0, borderColor: '#E5E7EB', radius: 8, minHeight: 0 },
+};
+
+/** L2 — a column owns its width and the alignment of the blocks inside it. Nothing else (§7.21). */
+export const COLUMN_SPEC: WidgetSpec = {
+  id: 'column', name: 'Column', group: 'Structure', reuse: 'many', family: 'container',
+  /* ⚠️ BOTH fields are gated on the box having something in it, which drops the whole Column group
+     for an empty one — a group with no visible fields is not rendered at all.
+     "Align the blocks inside" is the obvious case: there are no blocks. Width goes with it because
+     an empty column has no content to be a width OF — it is a placeholder waiting to be filled, and
+     a panel offering to size a placeholder is asking a question about nothing. Both come back the
+     moment anything lands in it, and the drag handles set the width either way. */
+  fields: [
+    /* ⚠️ NO Width slider. A column's width is DRAGGED — the eight selection handles set it, and the
+       side handle trades width with the neighbour on that side so the row still adds up. A slider
+       could only ever set this column's own share, leaving the panel and the handles disagreeing
+       about what a row is; and a width is judged against the column beside it, which is on the
+       canvas rather than in a list. `width` is still read, so a column already carrying one keeps
+       its size. */
+    /* A box holding rows or columns of its own gets the same spacing pair as a section. */
+    /* ⚠️ Gap is not a control any more — see the note in `GapBands`. Every section keeps its resting gap. */
+    {
+      key: 'blockAlign', label: 'Align the blocks inside', control: 'segmented', tab: 'style', group: 'Column',
+      options: [{ value: 'start', label: 'Top' }, { value: 'center', label: 'Middle' }, { value: 'end', label: 'Bottom' }],
+      when: (c) => c.hasContent !== false,
+    },
+  ],
+  packs: ['P1'],
+  noDelete: true,
+  notes: [{ tone: 'info', text: 'A column owns its width and how the blocks inside it sit. Everything else belongs to the section above it or the blocks within it.' }],
+  defaults: { width: 50, blockAlign: 'start' },
+};
+
+/* ── §7.22 Page ──────────────────────────────────────────────────────────── */
+
+export const PAGE_SPEC: WidgetSpec = {
+  id: 'page', name: 'Page', group: 'Structure', reuse: 'single', family: 'container',
+  fields: [
+  ],
+  packs: ['P1'],
+  noDelete: true,
+  /* ⚠️ Typeface, text scale and the palette USED to live here as three colour fields. They moved to
+     the Theme panel in the rail when a theme became mode + palette + type + button shape — a page is
+     one of the things a theme paints, not the place the theme is kept. */
+  notes: [{ tone: 'info', text: 'Typeface and colours are set once for the whole portal in Theme, in the right-hand rail. This page keeps its own background and spacing.' }],
+  defaults: {},
+};
+
+/* ── §7.23 Left rail ─────────────────────────────────────────────────────── */
+
+const RAIL_ITEMS = [
+  { id: 'r1', name: 'Requests', route: '/requests' },
+  { id: 'r2', name: 'Changes', route: '/changes' },
+  { id: 'r3', name: 'My Assets', route: '/assets' },
+  { id: 'r4', name: 'My CIs', route: '/cis', perm: 'Allow Requester to Access My CI' },
+  { id: 'r5', name: 'Knowledge', route: '/knowledge', perm: 'Allow Requester To Access Knowledge' },
+  { id: 'r6', name: 'My Approvals', route: '/approvals', perm: 'Allow Requester To Access My Approvals' },
+  { id: 'r7', name: 'My Team', route: '/team' },
+  { id: 'r8', name: 'Tasks', route: '/tasks' },
+];
+
+/* ── the top bar's action icons ────────────────────────────────────────────
+ *
+ * ⚠️ NO Design section at all — no Style, no Spacing — for the same reason the left rail has none:
+ * these are the PRODUCT's actions. Ask AI, the create button, notifications and the avatar appear on
+ * every screen of every portal, and an admin who could restyle or re-space them could make the one
+ * control that is everywhere look unlike the product it belongs to.
+ * ⚠️ It needs a spec at all because without one it fell through to the LEGACY `PortalElementPanel`,
+ * which hands every unrecognised node a generic Style and Spacing block — the two sections that
+ * should never have been on offer here. A node with no spec does not get "no panel", it gets the
+ * default one. */
+/* The bar's arrangeable actions, in their real order.
+   ⚠️ Ask AI, Create and the profile avatar are deliberately NOT here. They flank the cluster and
+   are fixed: Ask AI is a labelled button rather than a glyph, Create is the product's one primary
+   action, and an avatar at the far right is where every application in this suite puts it. A list
+   that showed all nine would offer three rows that refuse to move, which is worse than not offering
+   them — the panel would be describing a freedom the bar does not have. */
+const HEADER_ACTION_ITEMS = [
+  { id: 'type', name: 'Text', route: 'Font size' },
+  { id: 'chat', name: 'Conversations', route: 'Messages' },
+  { id: 'bell', name: 'Notifications', route: 'Alerts' },
+  { id: 'keys', name: 'Shortcuts', route: 'Keyboard' },
+  { id: 'home', name: 'Home', route: 'Portal home' },
+  { id: 'info', name: 'Help', route: 'Support' },
+];
+
+/* ── The top bar's action cluster ─────────────────────────────────────────────
+ *
+ * ⚠️ It now has the SAME panel the left rail has, and for the same reason: these are the product's
+ * own controls, so their ORDER is the admin's and nothing else is. Earlier this spec deliberately
+ * offered no list at all — the cluster was treated as one indivisible unit — but an admin who can
+ * drag the icons on the canvas and cannot see them anywhere in the panel has a gesture with no
+ * inventory: no way to know what is there, in what order, or that reordering was ever possible.
+ * The list is the canvas drag written down.
+ *
+ * ⚠️ The list and the canvas write the SAME value (`items` on this node). Two orders — one stored
+ * and one in a component's local state — is exactly the fault the bar used to carry: the icons
+ * moved, nothing was saved, and reopening the page put them back. */
+export const HEADER_ACTIONS_SPEC: WidgetSpec = {
+  id: 'header_actions', name: 'Actions', group: 'Chrome', reuse: 'single', family: 'collection',
+  fields: [],
+  packs: [],
+  noDelete: true,
+  notes: [{
+    tone: 'info',
+    text: 'These belong to the product and look the same on every portal. You can reorder them — here or by dragging them in the bar — but not add, remove or restyle them. What a requester can reach through them is set by their permissions, not here.',
+  }],
+  collection: {
+    key: 'items', group: 'Actions', addLabel: '', emptyHint: '',
+    /* FLAT for the rail's reason — this panel is one list and nothing else, so a collapsible group
+       would put a chevron above the only thing there is to see. */
+    flat: true,
+    noAdd: true, noOpen: true,
+    label: (it) => String(it.name ?? ''),
+    meta: (it) => String(it.route ?? ''),
+    seed: () => ({}),
+    fields: [],
+  },
+  defaults: { items: HEADER_ACTION_ITEMS },
+};
+
+export const RAIL_SPEC: WidgetSpec = {
+  id: 'rail', name: 'Left rail', group: 'Chrome', reuse: 'single', family: 'collection',
+  /* ⚠️ CONTENT only — no Design section at all. The rail is the product's own navigation: an admin
+     who could set its width, icon size, active-item treatment and spacing could make the one control
+     that appears on every screen of the portal look unlike the product it belongs to. The single
+     visual decision that is genuinely theirs is WHERE the icons sit, so that is the only one here,
+     and it lives with the destinations it arranges rather than in a styling section of its own. */
+  fields: [],
+  packs: [],
+  noDelete: true,
+  /* §7.23 — order and visibility are the admin's; the destinations are the product's. So the list
+     has no Add and no Delete, and a permission the requester lacks is not something to "enable"
+     from here. */
+  notes: [{
+    tone: 'info',
+    text: 'These destinations belong to the product — you can reorder them, but not add, remove or hide them. A destination the requester is not permitted to reach never appears, whatever the order.',
+  }],
+  collection: {
+    key: 'items', group: 'Destinations', addLabel: '', emptyHint: '',
+    /* ⚠️ FLAT. This panel is one list and nothing else, so wrapping it in a collapsible group put a
+       header and a chevron above the only thing there is to see — and left it possible to close the
+       panel's entire content while the panel stayed open. */
+    flat: true,
+    /* ⚠️ NOT hideable. The eye was the only per-row action on this list, and what it offered was
+       removing a product destination from the one navigation that appears on every screen of the
+       portal — the same power `noAdd` already withholds at the other end. The ORDER is the admin's;
+       which destinations exist is not. The note above says so, so the rule is legible rather than
+       just enforced. */
+    noAdd: true, noOpen: true,
+    label: (it) => String(it.name ?? ''),
+    meta: (it) => String(it.route ?? ''),
+    seed: () => ({}),
+    fields: [],
+  },
+  defaults: { items: RAIL_ITEMS },
+};
+
+/* ── §7.24 Top bar ───────────────────────────────────────────────────────── */
+
+/* Every action the real top bar carries, in its real order. ⚠️ The four NAVIGATION links were
+   removed (the left rail already reaches all of them) — the ACTIONS were not, and rebuilding the
+   bar from this list is what makes reordering the logo against them actually work. */
+const NAV_ITEMS = [
+  { id: 'n0', name: 'Logo', kind: 'logo', fixedVisible: true },
+  { id: 'n1', name: 'Ask AI', kind: 'action' },
+  { id: 'n2', name: 'Create', kind: 'action' },
+  { id: 'n3', name: 'Text', kind: 'action' },
+  { id: 'n4', name: 'Conversations', kind: 'action' },
+  { id: 'n5', name: 'Notifications', kind: 'action' },
+  { id: 'n6', name: 'Shortcuts', kind: 'action' },
+  { id: 'n7', name: 'Home', kind: 'action' },
+  { id: 'n8', name: 'Help', kind: 'action' },
+  { id: 'n9', name: 'Profile', kind: 'action' },
+];
+
+/* ── The logo ────────────────────────────────────────────────────────────────
+ *
+ * ⚠️ Its own spec, so selecting the logo edits the LOGO. It used to resolve to the top bar, which
+ * meant clicking the one image on the page opened the bar's background colour, height and divider —
+ * and the upload you were aiming at sat third in a list about something else.
+ * ⚠️ NO Layout accordion. Where the logo sits is `logoPos` on the BAR, because it is a position
+ * relative to the actions beside it — a layout section here would be a second control for a value
+ * that is not even this node's to hold. */
+export const LOGO_SPEC: WidgetSpec = {
+  id: 'logo', name: 'Logo', group: 'Chrome', reuse: 'single', family: 'flat',
+  panel: {
+    /* ⚠️ 240 × 64 — the top bar renders the mark at about 28px tall, so this is the 2× of a
+       comfortable wordmark. Wider than tall, because every logo in that bar is.
+       ⚠️ TWO slots behind a Light/Dark switch, stored as `logoSrc` and `dark:logoSrc` — the same
+       per-mode pair the colour fields use, so `cfgFor` promotes it and no renderer has to know.
+       A mark drawn for a white bar can disappear on a dark one and this portal ships both themes,
+       so one upload could only ever be right half the time. The dark slot is OPTIONAL and falls
+       back to the light one: most portals have a single logo, and a bar that empties itself the
+       moment somebody tries the dark theme reads as a broken page. */
+    content: [{ key: 'logoSrc', label: 'Logo image', control: 'logoPair', suggested: '240 × 64', noun: 'logo' }],
+    /* ⚠️ NO Design section. A logo is one supplied image sitting in the product's own bar: filling
+       it, bordering it or rounding it styles a mark somebody else's brand guidelines own, and its
+       spacing belongs to the bar — which is already why `logoPos` lives there. The panel is the
+       upload and nothing else, which is the whole truth about this layer. */
+    accordions: [],
+  },
+  noDelete: true,
+  notes: [{ tone: 'info', text: 'Where the logo sits against the actions is set on the top bar, since it is a position relative to them.' }],
+  fields: [], packs: [],
+  defaults: {},
+};
+
+export const NAVBAR_SPEC: WidgetSpec = {
+  id: 'navbar', name: 'Top bar', group: 'Chrome', reuse: 'single', family: 'container',
+  /* ⚠️ NO item list. The bar is two things, not ten: the logo, and the actions AS ONE BLOCK.
+     Letting someone drag Bell between Home and Help is a freedom nobody wants and a bar nobody can
+     read — the action cluster is a unit that belongs top-right. What IS worth arranging is where
+     the logo sits against it, which is the one control below. */
+  panel: {
+    content: [
+      { key: 'logoSrc', label: 'Logo', control: 'upload' },
+      {
+        key: 'logoPos', label: 'Logo position', control: 'segmented',
+        options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Centre' }, { value: 'right', label: 'Right' }],
+      },
+    ],
+    accordions: [
+      {
+        id: 'style', open: true,
+        fields: [
+          { key: 'barBg', label: 'Background colour', control: 'color' },
+          { key: 'barHeight', label: 'Bar height', control: 'sliderUnit', min: 48, max: 96, unit: 'px' },
+          /* ⚠️ "Divider under the bar" is gone, and `barDivider` stays in `defaults` where the
+             renderer still reads it — so every bar keeps the line it already draws. A hairline
+             between the product's own top bar and the page under it is not a decision worth a
+             switch: with it the bar reads as chrome, without it the bar and the banner run into
+             each other, and only one of those is ever the answer. */
+          /* ⚠️ NO Shadow control. A full-width band at the very top of the page is the one surface
+             where a drop shadow reads as a rendering artefact rather than as depth. The four
+             `shadow*` keys stay in `defaults` and the renderer still reads them, so a bar that
+             already carries one keeps drawing it — there is simply no longer a way to set one. */
+        ],
+      },
+      { id: 'spacing', spacing: 'both' },
+    ],
+  },
+  noDelete: true,
+  fields: [], packs: [],
+  defaults: {
+    logoSrc: '', logoPos: 'left',
+    barBg: '#FFFFFF', barHeight: 56, barDivider: true,
+    shadowOn: false, shadowColor: '#0F172A', shadowType: 'outer', shadowPos: 'bottom',
+  },
+};
+
+/* ── The banner's auto-layout GROUPS (Text group, Content group) ─────────────────────────────────
+ * Direction, gap and how the children line up — the three questions a Figma auto-layout frame asks.
+ * ⚠️ `gap` has no default here: Group 1 starts at 8px and the Content group at 20px (the spacing the
+ * banner always had), resolved by `bannerGroupGap`. `align` unset means "follow the banner". */
+export const BANNER_GROUP_SPEC: WidgetSpec = {
+  id: 'banner_group', name: 'Group', group: 'Structure', reuse: 'single', family: 'flat',
+  fields: [
+    /* ⚠️ NO Auto-layout group. Direction, Align items and Vertical are all on the section's own
+       floating toolbar — the same three controls, on the thing they arrange, where you can see the
+       result rather than predict it. Two copies of one setting means the one you are not looking
+       at wins the last write. Every key is still read. */
+  ],
+  packs: [],
+  noDelete: true,
+  defaults: { dir: 'column' },
+};
+
+/* A banner ROW or COLUMN — the container a preset makes when it splits the banner.
+ *
+ * ⚠️ Direction is the ONE thing it decides, and it is TREE state: flipping it turns a row of sections
+ * into a stack of them, children and order untouched, which is the same non-destructive flip a page
+ * section’s Behaviour makes. The gaps between sections stay on the BANNER — one number per axis for the
+ * whole banner, so two rows cannot drift apart — and Spacing is added by the drawer, which is what gives
+ * a row its own padding and its negative margins. */
+export const BANNER_BOX_SPEC: WidgetSpec = {
+  id: 'banner_box', name: 'Row', group: 'Structure', reuse: 'single', family: 'flat',
+  /* ⚠️ NO Behaviour control, and it was built and taken out again rather than never tried. A branch's
+     direction is ALWAYS the opposite of its parent's — `prune` merges a branch into a parent laid out the
+     same way, which is what keeps the tree canonical — so flipping one ALWAYS dissolved it into its
+     parent. The layout that came out was right, but the thing you had selected no longer existed: a
+     control that deletes what you are configuring, wearing the name of a setting. The banner's
+     Arrangement presets are how its shape changes; this panel is what the row is LIKE.
+     Spacing (its own padding, and negative margins) and Shadow are added by the drawer; the two
+     alignments are on its floating toolbar. */
+  fields: [],
+  /* ⚠️ P1, and it is what makes this panel EXIST. The drawer drops the whole Design section — heading
+     and body — for a widget with nothing to style, so a spec carrying no fields and no packs opened as an
+     empty drawer under a title. The pack is also the honest answer to what a row IS: a box, which can
+     take a fill, a border and corners of its own — a tinted band inside the banner is a real thing to
+     want, and `Sel` already paints those keys for any node that does not draw its own surface. */
+  packs: ['P1'],
+  noDelete: true,
+  defaults: {},
+};
+
+/* ── Blocks that hold a SET of cards and lay them out in 1–4 columns ──────────────────────────── */
+/* Presets drawn from the real number of cards — all in one row, fewer per row, or stacked. */
+const COLUMNS_FIELD = {
+  key: 'cols', label: 'Presets', control: 'tilePresets' as const, tab: 'style' as const, group: 'Columns',
+};
+/* The gap between the cards INSIDE the block — its own numbers, touching nothing else on the banner.
+ *
+ * ⚠️ A PAIR, and each half appears only when the arrangement HAS that axis. It was one number with a
+ * horizontal glyph, applied as the CSS `gap` shorthand — so on the Stacked preset the control drew a
+ * between-columns icon for a distance that was entirely vertical, and there was no way to say "tight
+ * rows, wide columns" on the presets that have both. The axes come from the preset: all-in-one-row has
+ * columns and no rows, stacked has rows and no columns, 2- and 3-per-row have both once there are more
+ * cards than fit one line.
+ * ⚠️ Same control and same keys as every band and section on the page (`colGap` / `rowGap`, via the
+ * panel's `gapPairX/Y`), so the pink strips on the canvas and this field are one setting. The old
+ * `tileGap` is still READ as the fallback, so a block that already carries one does not move. */
+/* ⚠️ TILE_GAP_FIELD is GONE, not stubbed — the same trap `TITLE_GAP_FIELD` fell into: a field left
+ *  behind with `when: () => false` is one spread away from coming back as an unlabelled box.
+ *  `colGap` / `rowGap` / `tileGap` are all still READ, so no block moved. */
+
+/* The portal's four action cards as ONE block. Each card stays its own node (select it to edit its
+ * subtitle and icon); the block only decides how many sit across. ⚠️ Adding it MOVES the Quick Actions
+ * row's cards into it rather than showing them twice — see `actionsMoved` in the preview. */
+export const ACTION_CARDS_SPEC: WidgetSpec = {
+  id: 'action_cards', name: 'Action cards', group: 'Actions', reuse: 'single', family: 'flat',
+  fields: [COLUMNS_FIELD],
+  packs: [],
+  defaults: { cols: '4' },
+};
+
+export const KPI_SOURCES = ['My requests', 'My changes', 'Approvals waiting on me', 'My assets', 'My CIs', 'Knowledge'];
+export const KPI_SEED = [
+  { label: 'Open requests', source: 'My requests' },
+  { label: 'Pending approvals', source: 'Approvals waiting on me' },
+  { label: 'My assets', source: 'My assets' },
+];
+/* A set of counters, laid out like the action cards. */
+export const KPI_GROUP_SPEC: WidgetSpec = {
+  id: 'kpi_group', name: 'KPI tiles', group: 'Custom', reuse: 'many', family: 'collection',
+  fields: [COLUMNS_FIELD],
+  packs: [],
+  collection: {
+    key: 'items', group: 'Tiles', addLabel: 'Add tile', max: 8,
+    emptyHint: 'No tiles yet.',
+    hideable: true,
+    label: (it) => String(it.label ?? ''),
+    meta: (it) => String(it.source ?? ''),
+    seed: (i) => ({ ...KPI_SEED[i % KPI_SEED.length] }),
+    fields: [
+      { key: 'label', label: 'Label', control: 'text', group: 'Content' },
+      { key: 'source', label: 'Counts', control: 'select', group: 'Content', options: KPI_SOURCES },
+    ],
+  },
+  defaults: { cols: '3', items: KPI_SEED.map((k) => ({ ...k })) },
+};
+
+export const STRUCTURE_SPECS: WidgetSpec[] = [
+  BANNER_GROUP_SPEC, BANNER_BOX_SPEC, HERO_SPEC, ACTION_CARDS_SPEC, KPI_GROUP_SPEC, SEARCH_SPEC, SECTION_SPEC, COLUMN_SPEC, PAGE_SPEC, RAIL_SPEC, NAVBAR_SPEC, LOGO_SPEC,
+  HEADER_ACTIONS_SPEC,
+];

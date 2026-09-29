@@ -1,0 +1,2568 @@
+**On session start:** If `HANDOFF.md` exists in this directory, read it before anything else for the latest state of the work.
+
+# ServiceOps Ticket Detail
+
+## What this is
+A high-fidelity UI prototype of the Motadata ServiceOps ITSM product — list pages and full detail "drawers" for Tickets/Requests, Problems, Changes, Releases, the Asset modules (Hardware, Software, Non-IT, Consumable), the procurement modules (Software Licenses, Contracts, Purchases), CMDB Base CIs, the Patch-management modules (**Patches, Patch Deployments, Endpoints**), and the **Vulnerability** modules (Vulnerabilities, Detected CVEs). It's a front-end mockup (mock data, no backend) used to design and demo the detail-page experience.
+
+## Tech stack
+- React + TypeScript
+- Vite (build/dev)
+- Tailwind CSS for styling
+- lucide-react icons, Radix UI + MUI components, sonner for toasts
+- `@xyflow/react` (React Flow 12) for the Hardware Asset Relationship topology canvas and the Patch **Superseded** supersedence map
+- Deploys as a static build to GitHub Pages
+
+## Structure
+- `src/app/routes.ts` — **the URL scheme** (`Page`, `ADMIN_ROUTES`, `parseHash`/`formatHash`). Every screen is addressable; see the Routing bullet under Key context.
+- `src/app/App.tsx` — top-level page switcher, driven by the URL (`request` | `problem` | `change` | `release` | `hardware-assets` | `software-assets` | `non-it-assets` | `consumable-assets` | `software-licenses` | `contracts` | `purchases` | `cmdb` | `patches` | `bom` | `admin`). App also holds `pendingSoftwareAssetId` + `openSoftwareAsset(id)` so the License page's "Managed Softwares" card can deep-link into a software asset's drawer (passed to `SoftwareAssetsListPage` as `initialOpenId`/`onInitialOpenConsumed`).
+- `src/app/components/` — all UI. Pattern per module: `XListPage` + `XTable` + `XDrawer` (the detail page is a full-screen drawer opened from a row).
+  - Tickets: `TicketListPage`, `TicketTable`, `TicketDrawer` (~6.5k lines, the base detail page all others clone).
+  - Changes: `ChangeListPage`, `ChangeDrawer`. Releases: `ReleaseDrawer`.
+  - Hardware Assets: `HardwareAssetsListPage`, `HardwareAssetsTable`, `HardwareAssetDrawer`, `AssetFields`, `HardwareAssetActionsMenu` (asset-specific 3-dot menu).
+  - Software / Non-IT / Consumable Assets each have list-page + table + **their own detail drawer** (separate files so they can diverge): `SoftwareAssetsListPage`+`SoftwareAssetsTable`+`SoftwareAssetDrawer`, `NonItAssetsListPage`+`NonItAssetsTable`+`NonItAssetDrawer`, `ConsumableAssetsListPage`+`ConsumableAssetsTable`+`ConsumableAssetDrawer`. **Drawer clone chain:** `TicketDrawer` → `HardwareAssetDrawer` → `SoftwareAssetDrawer` → `NonItAssetDrawer` → `ConsumableAssetDrawer` → `SoftwareLicenseDrawer`. Each later drawer keeps its own `XToAssetShape()` adapter that maps its data type onto `HardwareAsset` so the cloned body compiles. List pages clone the Hardware list page, reuse shared `Header`/`AssetsToolbar`/`Pagination`, carry realistic mock data (no test/demo), and open their drawer via `onAssetClick`.
+  - **Software Licenses** (`SoftwareLicensesListPage`+`SoftwareLicensesTable`+`SoftwareLicenseDrawer`): opened from the Assets sidebar flyout "Software Licenses" item. List columns = ID `LIC-##` · Name · Product · License Type · Purchase/Allocation/Installation Count · Expiry Date · Action (edit/delete). The drawer is cloned from `NonItAssetDrawer` with a `licenseToAssetShape` adapter; see the Software License bullet under Key context for its tabs/panel specifics.
+  - **Contracts** (`ContractsListPage`+`ContractsTable`+`ContractDrawer`): opened from the Assets flyout "Contracts". `CON-##` ids. Drawer cloned from Non-IT with a `contractToAssetShape` adapter.
+  - **Purchases** (`PurchasesListPage`+`PurchasesTable`+`PurchaseDrawer`): opened from the Assets flyout "Purchases". List columns = ID `PO-YYMM-###` · Name · Order Number · Status (colored dot) · Owner (avatar/Unassigned) · Vendor `VCAT-##: …` · Required By. Drawer cloned from `NonItAssetDrawer` with a `purchaseToAssetShape` adapter; see the Purchase bullet under Key context for its tabs/panel specifics.
+  - **CMDB / Base CI** (`CmdbListPage`+`CmdbTable`+`CmdbDrawer`): opened from the **CMDB sidebar icon** (not the Assets flyout). List title "Base CI" / view "All CI"; columns = ID `CI-###` · Name (with green/yellow agent-health dot) · CI Type (icon + label: Base CI/Application/Mac Laptop/Server/Switch/Hardware/Windows Laptop/Mobile Devices) · Status (Operational gray dot, or orange "Select") · Host Name · IP Address · Used By (select-style chip) · Managed By Group · Managed By (avatar/Unassigned). Drawer **cloned from `HardwareAssetDrawer`** with a `ciToAssetShape` adapter (so the full hardware detail UI renders for now). Realistic enterprise CIs (servers/apps/switches/laptops), not raw agent strings.
+  - **Patches** (`PatchesListPage`+`PatchesTable`+`PatchDrawer`): opened from the **Patch sidebar icon** hover flyout — the flyout now has THREE real pages: **Patches**, **Patch Deployment**, **Endpoint** (the rest stay placeholders). `PCH-####` ids, 32 realistic `mockPatches` (optional `category` + `description` fields, seeded on a subset). Drawer cloned from `NonItAssetDrawer` with a `patchToAssetShape` adapter. Patch-specific tab components: `PatchComputersTab` (Endpoint), `PatchInstallationTab` (Deployment), `PatchVulnerabilitiesTab` + `PatchVulnEndpointsPanel` (Impacted Endpoints side popup), `PatchSupersededTab` (React Flow supersedence map), shared right-rail data in `PatchPanelData.ts`. See the Patch bullets under Key context. The `Patch` interface carries optional adapter payloads: `deployment?` (set by `deploymentToPatchShape`) and `endpoint?` (`{ agentOnline, systemHealth }`, set by `endpointToPatchShape`) so the deployment/endpoint drawers' header KPIs stay data-driven.
+  - **Patch Deployments** (`PatchDeploymentsListPage`+`PatchDeploymentsTable`+`PatchDeploymentDrawer`+`CreatePatchDeployment`): `PDR-####` ids, 32 mock deployments (incl. OS Upgrade runs and 3 archived). Drawer is a SEPARATE-FILE clone of `PatchDrawer` heavily customized — see the Patch Deployment bullet under Key context. `PatchDeploymentPatchesTab.tsx` holds the deployed-patches grid (**`DEPLOYED_PATCHES` is ONE patch by design** — a run carries a single payload, so the Overview card, the header KPI, the Patches tab and the patch×endpoint matrix all agree; the matrix is therefore 1 × 4 endpoints); **`CreatePatchDeployment.tsx`** is the create form the listing CTA swaps in — see the deployment-type bullet under Key context.
+  - **Endpoints** (`EndpointsListPage`+`EndpointsTable`+`EndpointDrawer`): `EP-###` ids (renamed from AGENT- everywhere, incl. `PatchComputersTab`'s shared mock computers), 30 realistic mock endpoints (agent-health dot before the id pill, OS builds, offices, health, tags, reboot). Drawer is a SEPARATE-FILE clone of `PatchDrawer`, now substantially diverged — see the Endpoint detail bullet under Key context. Endpoint-specific tab components: `EndpointPatchesTab.tsx` (this endpoint's Missing/Installed/Ignored patches) + `EndpointDeploymentTab.tsx` (Patch/Package/Registry pushes).
+  - **Vulnerability** (own sidebar icon — `IconVulnerability`, the shield SVG in `SidebarIcons.tsx` — with a hover flyout: **Vulnerabilities** → page, **Detected CVEs** → page, **Endpoint** → the SHARED `'endpoints'` route [now reuses the Patch module's Endpoints listing + detail page; earlier a deliberate placeholder, user reversed that]): `VulnerabilitiesListPage`+`VulnerabilitiesTable`+`VulnerabilityDrawer` — "Detected Vulnerability Patches" view, PCH-#### rows (Exploited/Non-Exploited CVE lists, Category, CVSS 3.1, Published, Impacted Endpoints; several ids intentionally overlap the Patch catalog); drawer = 1:1 `PatchDrawer` clone via `vulnerabilityToPatchShape`. `DetectedCvesListPage`+`DetectedCvesTable`+`DetectedCveDrawer` — "Detected Vulnerabilities" view, real June-2024 Patch-Tuesday CVE rows (**tinted severity pills** Critical/High/Medium, CWE, Patch Availability, Exploit Status red "Yes", NVD Status); drawer cloned from `PatchDeploymentDrawer` via `cveToPatchShape`, now DIVERGED — see the Detected CVE bullet under Key context. StackModules `'vulnerabilities'` / `'detected-cves'`.
+  - **BOM** (own sidebar icon — `IconBom`, the lucide `Layers` glyph, sits directly BELOW the Vulnerability icon; route `'bom'`): `BomInventoryListPage`+`BomInventoryTable` — title "BOM Inventory", segmented **Agent CIs · 30 / Managed CIs · 0** pills, blue **+ Ingest BOM** CTA, columns = CI (`EP-###` pill w/ agent dot) · Host Name · IP · OS · **BOM Status** (Generated green / Partial amber / Not Generated grey tinted pills) · Products · Components · **Findings** (amber when >0) · Crypto Assets (key icon) · AI Models · Last Generated. Managed CIs is a deliberate empty state (ingested rather than scanned BOMs). Rows open the **existing `EndpointDrawer`** via `openInStack('endpoints', …)` with `bomMode: true` on the adapted `Patch` record, which makes the drawer land on its BOM tab. See the BOM bullets under Key context.
+  - **Admin hub** (opened from the `Header` gear via `onOpenAdmin`; own shell — the product icon rail is replaced by a grouped settings nav with "Back to app" as the way out): `AdminPage` (shell + state) + `AdminSidebar` (grouped nav, search matches a section OR any card name) + `AdminOverview` (collapsible sections of module cards) + `adminData.ts` (`ADMIN_NAV` 6 groups, `ADMIN_SECTIONS` 24 sections / 164 cards with real hrefs, `sectionByTitle()`) + `AdminIcons.tsx` (64-icon registry, `adminIcon(name)` with a `Settings2` fallback). **Nav depth — three levels, each visually distinct so depth reads without counting indents (`SIDEBAR_TREE` in `adminData.ts` opts a section in):** **L1 = section**, icon + chevron, and clicking it ONLY expands (the right pane is untouched — a container is not a destination); **L2 = module**, icon, indented to `pl-9`, and selecting one opens that module's listing on the right; **L3 = submodule**, NO icon, wrapped in a `border-l` rail whose segment beside the hovered row lights up blue (`-ml-px border-l-2 border-transparent` → `hover:border-[#3D8BD0]`), so a row reads as belonging to the branch above it. L3 data lives on `AdminCard.children`. A section NOT in `SIDEBAR_TREE` stays a single row with a card COUNT instead of a chevron and still scrolls the Overview — expansion is opt-in because a section only earns its own branch once its modules are real screens. Currently opted in: **BOM Management** (L2 = BOM Licensing / Scheduler / Retention) and **Patch Management**. `AdminPage` keeps `activeCard` for the L2 highlight; `BOM_SCREEN_FOR` is the ONE map from card title → screen, used by the nav, the Overview cards and the module's own `onScreen` callback, so the three can't disagree about where a name goes. ⚠️ An L2 row that opens nothing must not stay highlighted (`opensSomething` gate) or the nav claims you are somewhere the Overview is showing behind. Otherwise, selecting in the sidebar SCROLLS the Overview rather than swapping the pane — a hub is one surface. **Exception: sections listed in `MODULE_TITLES` (`AdminPage`) have a real module behind them** and swap the pane instead; the Overview's cards route through an `onOpenCard(sectionTitle, cardTitle)` prop that returns `false` when there's no module (falling back to the href toast). See the BOM Management bullet under Key context. A CARD can also own a module — `onOpenCard` matches on `(section, card)`, which is how **OS Upgrade** opens (see its bullet under Key context).
+  - **OS Upgrade (Admin › Patch Management)**: `AdminOsUpgradeModule` (listing + the whole upload state machine) + `AdminOsUpgradeDetail` (Summary · Computers) + `OsUpgradeUpload.tsx` (the Upload ISO popup, the minimised dock, `UploadStatusPill`/`UPLOAD_TONE`) + `osUpgradeData.ts` (15 `OSU-#` images, prerequisite profiles, the fleet generator + evaluator, upload-attempt seeds). See the OS Upgrade bullet under Key context.
+  - **Support Portal (Admin › Support Channels)**: `AdminSupportPortalModule` (the two-tab shell + the Customization listing + all page state) + `AdminSupportPortalSettings` (the Settings tab — nine accordions of what a requester may DO) + `SupportPortalBuilder` (the full-screen canvas, owns selection/content/style state) + `SupportPortalPreview` (the portal page the canvas renders) + `SupportPortalTemplateGallery` (the Use-Template picker) + `SupportPortalAddPanel` (Add → Elements) + `PortalCanvas.tsx` (selection context, `<Sel>` wrapper, kind-aware floating toolbars) + `PortalElementPanel.tsx` (the selected element's CONTENT + STYLE editor) + `supportPortalData.ts` (`PortalPage`, 7 `PORTAL_TEMPLATES`, the 65-entry `PORTAL_ELEMENTS` catalogue, portal content) + `portalPageModel.ts` (`PORTAL_NODES`, `DEFAULT_CONTENT`, `NodeStyle`) + `portalBannerLayout.ts` (the banner's item tree, its presets and the card GROUP) + `portalTone.ts` (a theme's derived tints). See the Support Portal Customization bullets under Key context.
+  - **Ticket detail V2 (`TicketDrawerV2` + `IncidentDetailsTabV2`)**: the SECOND design option of the Ticket detail page — a full clone of `TicketDrawer.tsx` opened ONLY for **INC-33** from the ticket listing (routed via the `'request-v2'` `StackModule`; `TicketListPage.handleOpenTicket` branches on the id). ⚠️ **RULE: "version 2" change requests go into these V2 files only — V1 `TicketDrawer.tsx` is FINAL.** Shared-component divergence is done via opt-in props only V2 passes: `compactTicketFields` + `hideAdditionalFields` (panel/accordion) and `twoColumn`/`hidePin` (`SystemFieldsRenderer`). See the Ticket V2 bullet under Key context.
+  - **Shared drawer chrome** (used by ALL detail drawers): `MinimizedDrawerRail` (minimized right-edge rail) + `DrawerTabStrip` (open-item tab bar with overflow dropdown) — see the Drawer minimize/tabs bullet under Key context. `DrawerStack` (`DrawerStackProvider` + `useDrawerStack`) is the cross-module host that opens any module's real detail page as a tab in the same drawer — see the Cross-module drawer host bullet under Key context.
+  - Shared list chrome: `AssetsToolbar` (title + view dropdown + action icons + search; `title`/`viewLabel` props per module), `Pagination`, `Sidebar` (Assets hover flyout maps labels → pages in `pageFor`/`sectionActive`; each module icon's `NavItem` uses a **Radix black tooltip** `side="right"` — replaced the native `title` — except the Assets item which keeps its flyout via `disableTooltip`). `SidebarIcons.tsx` holds the custom nav SVGs; **`IconKnowledge` renders the lucide `Lightbulb`** so the sidebar Knowledge icon matches the composer's Insert-Knowledge bulb (one bulb across the product).
+  - Shared detail panels: `TicketPropertiesPanel` (right-side properties; hosts the asset-only `users`/`notes` groups, the **email Notifications group**, the top-pinned Agent Information block, and the warranty pill), `TicketFieldsAccordion`, `PinnedFieldsAccordion`, `AdditionalFieldsAccordion` + `SystemFieldsRenderer`, `TicketDrawerUtils` (field lists/options/helpers), `Sidebar`, `Header`.
+    - **System Fields live UNDER the main Fields accordion (all 13 detail pages):** the old Additional-Fields "Form Fields / System Fields" tab pair was removed — `AdditionalFieldsAccordion` now shows only the form/custom fields (no tabs), and `SystemFieldsRenderer` is rendered as a labelled **"System Fields"** subsection (uppercase 12px header + top hairline) in `TicketFieldsAccordion` (Ticket/Problem/Change/Release) / the Asset Fields accordion (asset+procurement, via `assetMode`/`purchaseMode`). **Single "View more" (tickets AND assets):** the System Fields subsection sits INSIDE the accordion's "View more" expansion so ONE toggle reveals both the extra fields AND all system fields — the renderer is passed `hideShowMore` (all fields, no separate "Show more (N)" toggle). Built as a `systemFieldsSection` const in `TicketFieldsAccordion`: for tickets/problem/change/release it's rendered inside the `showMoreFields` block (before "View less"); for asset/procurement it's passed to `AssetFields` as a **`footer`** prop, and `AssetFields` renders it inside each variant's `{(showMore || q) && …}` "View more" block (the LICENSE variant no longer renders the footer at all — per request the License page shows ONLY Product + License Type, no System Fields). Centralized: `TicketPropertiesPanel` forwards `getFilteredAdditionalFields`/`showMoreSystemFields`/`setShowMoreSystemFields` to `TicketFieldsAccordion`, and its Ticket-Fields **search gate** also fires on a system-field match (`getFilteredAdditionalFields().length > 0`) so searching a system field still surfaces it. No per-drawer edits were needed — the drawers already pass these props to the panel.
+  - Shared feature components added later: `AssetAiSummary` (no-title AI summary at top of asset Overviews), `DescriptionInlineImage` (inline SVG "pasted" image in long descriptions), `DescriptionExpandModal` (full-screen description editor), `demoCustomFields.ts` (`DEMO_CUSTOM_FORM_FIELDS`, the 50+ ticket custom fields — now GROUPED, see the demo-custom-fields bullet), `AddWorkLogModal` + `WorkHistoryModal` (Work Tracker), `SendEmailModal` + `NotificationsPanel` (email Notifications group), `AttachmentPreviewModal` (centered image/doc preview), `AddRelationshipPanel` + `ActiveIssuesPanel` (Relationship-topology side panels — see the topology bullet), `RelSavedViews` (topology Saved Views pill + popup), `CopyableEmails` (click-to-copy email spans in conversation headers/tooltips), `EditorToolbar` (shared rich-text composer toolbar — see the composer-editor bullet).
+
+## How to run
+- Install: `pnpm install` (repo has `pnpm-lock.yaml` + `pnpm-workspace.yaml`, no `package-lock.json` — `npm install` fights the pnpm-managed tree; see the pnpm warning under Key context)
+- Dev: `npm run dev` (or `pnpm dev`)
+- Build: `npm run build` (or `pnpm build`) — runs `node scripts/build-tasks.mjs` (regenerates `public/tasks/tasks.json` from `tasks.md`) then `vite build`
+- Dev server: the port used throughout this project is **5200** — `npm run dev -- --port 5200`, served at
+  `http://localhost:5200/serviceops-ticket-detail/` (the `base` in `vite.config.ts`, so the bare host 404s).
+- No lint script and no test suite/framework are configured in this repo — don't hunt for one; `npm run build` is the only automated check (esbuild only, not a TypeScript typecheck).
+- ⚠️ **There IS a way to typecheck, and the file said so eight times without ever giving it.** TypeScript
+  is not a dependency, but pnpm can fetch it for one run:
+  ```
+  pnpm --package=typescript@5.6.3 dlx tsc --noEmit --jsx react-jsx --skipLibCheck \
+    --moduleResolution bundler --module esnext --target es2020 --strict false <files…>
+  ```
+  Pass the handful of files you touched, not the whole tree. **Filter the output** — without a tsconfig
+  every file reports `Cannot find module` and `has no exported member` for its imports, which are noise;
+  grep for your filenames and drop those two phrases. Everything left is real.
+  This is the only thing that catches the two failure modes the build cannot: a symbol used but never
+  imported or hooked (a `ReferenceError` that blanks the page at runtime) and a duplicate key in an
+  object literal (one of the pair is silently dead). Both shipped green through `npm run build` in
+  September 2026 and were caught only by running the above.
+- ⚠️ **Known pre-existing failure:** `portalWidgetSpec.ts` has a TS1117 duplicate key —
+  `fields: [], packs: []` sitting beside the action cards' real field list (line 921 as of 22 Sep
+  2026 — it moves with every edit above it, so grep the pair rather than trusting a number). It is on `main`, esbuild
+  does not see it, and the action-card panel still renders its Subtitle and Icon correctly, so one of
+  the pair is dead code. **Do not delete one on a guess** — removing the wrong one takes out all four
+  action-card panels. Expect this line in any typecheck output and ignore it unless you are fixing it
+  deliberately.
+
+## Key context
+- **Routing — every module has a URL (`src/app/routes.ts`).** ⚠️ **HASH routing, deliberately**: this deploys as a static build to GitHub Pages, which has no SPA rewrite, so a real path like `/serviceops-ticket-detail/admin/os-upgrade` would 404 on a direct load or refresh. A hash never reaches the server, so every link works cold with no server config. Shape is **`#/<page>`** and **`#/admin/<module>`** — e.g. `#/patch-deployments`, `#/admin/os-upgrade`, `#/admin/bom-retention`. `App` seeds its state from `parseHash(location.hash)` (so a shared link lands with no flash of the default page), listens for `hashchange` so browser back/forward work, and writes the hash through one `go(route)` helper. ⚠️ An effect **canonicalises the bar** — a bare load is stamped and anything unrecognised is rewritten to the route it fell back to (`#/nonsense` showing the request list is the exact lie the scheme exists to prevent), via `replaceState` so correcting a URL leaves no history entry. Admin is two-way: `AdminPage` takes `moduleSlug` + `onModuleChange`, applies an incoming slug through `applySelect`, and reports its own navigation back out — a **`pushedRef`** breaks the round trip, since without it the slug App pushes down re-runs the selection on every render. ⚠️ **Adding a module means adding its route in ONE place** — a `Page` value for a technician-portal listing, or an `ADMIN_ROUTES` row (`slug` → `section` + optional `card`, the same pair `AdminPage.select()` takes) for an admin screen. Only screens that actually exist get a slug: a URL promising a screen nobody built is worse than no URL. Record-level deep links (`#/request/INC-32`) are NOT wired yet — the drawer stack still owns which record is open. **The tab is named after the screen** — `titleFor(route)` in `routes.ts` builds `"<Module> · Motadata ServiceOps"` from `PAGE_TITLES` / the `ADMIN_ROUTES` row's `card ?? section` (the same words the sidebar uses, so the tab can't invent a third name), and an effect in `App` writes it to `document.title`. ⚠️ **This cannot fix a chat-app link PREVIEW**: an unfurl is fetched server-side and the `#fragment` is never sent, so a crawler only ever sees `index.html`'s static `<title>` — which is why that one is the PRODUCT name (`Motadata ServiceOps`) and not any one module's. Every pasted link therefore previews correctly-but-generically, and reads exactly right once opened.
+- **Detail pages are clones.** `ChangeDrawer`, `ReleaseDrawer`, and `HardwareAssetDrawer` are all clones of `TicketDrawer`, adapted to their data type. They reuse the shared panels (`TicketPropertiesPanel`, `TicketFieldsAccordion`, `PinnedFieldsAccordion`).
+- **`HardwareAssetDrawer` uses an adapter** (`assetToTicket`) to map a `HardwareAsset` onto the `Ticket` shape so the cloned body compiles unchanged. Asset-specific UI is toggled with an `assetMode` prop threaded through the shared panels — keep asset changes gated on `assetMode` so tickets/changes/releases are unaffected.
+- **Asset drawer tabs** (in `HardwareAssetDrawer`): Overview (default — dashboard cards), Properties, Hardware (category sub-nav of computer-system/OS/BIOS/RAM/…), Software (inventory — defaults to **card view**, toggle to list/table w/ column toggle), Baseline, Relationship, Approvals, Financials (dashboard: hero cost cards + depreciation chart + cost timeline; Add Cost / Configure Depreciation side drawers), History (renamed from Audit Trails; category dropdown + date-range/filter/download toolbar; timeline + table histories incl. Baseline/Variance). Tab order/overflow ("More" dropdown) is computed in the `calculateTabOverflow` effect — `allTabs` is built there, so when adding/removing tabs update both the base arrays AND the approvals/relations insert anchors.
+- **Asset Relationship tab = React Flow topology (`RelationshipGraph.tsx`; in Hardware, Software, Non-IT, Consumable AND CMDB drawers — the topology block + rel* states + hotkey effect were node-sweep transplanted from Hardware into the other four, so drawer-side toolbar/wiring changes need the same sweep; `RelationshipGraph`/`AddRelationshipPanel`/`ActiveIssuesPanel`/`RelSliderRow` are shared modules).** Toolbar LEFT: node **search** (`Ctrl+F` focuses, `Esc` clears; matches highlight, rest fades) + a single MERGED **Filter pill** (funnel icon — lucide renders it as `lucide-funnel`, not `lucide-filter`; label = first selection + "+N" per filter joined "·", blue when either is set) opening ONE popup with two TABS (`relFilterTab` state; side-by-side columns read as parent→child so tabs were chosen) — **Node Type** tab (All + the 9 relation categories → mapped to node types, spotlight-dims non-matching) and **Connection** tab (search + ALL relation labels in `REL_RELATIONS` catalog order — shared with the Add Relationship panel — plus canvas-only extras reported live via `onConnectionTypesChange`; selecting one renders matching-relation EDGES with the full hover treatment [animated dashed flow + relation label] and their endpoints stay lit via the `connectionFilter` prop). A blue DOT on a tab label marks a set filter in the hidden tab; opening lands on the tab that has an active filter. Row clicks TOGGLE and keep the popup open; footer = Clear all + Done. BOTH filters are **MULTI-SELECT**: `relFilter`/`relConnFilter` are `string[]` (graph props `typeFilter`/`connectionFilter` accept a single value OR an array); the two filters combine as a **UNION** of lit nodes, and matching connection edges keep the animated hl treatment even when a type filter is also set. Selected options render as removable **light-gray chips** (`#F1F5F9`, dark text) at the top of the popup, and selected rows use a light-gray fill + blue check — deliberately NOT blue fills, so a many-selection popup stays neutral. Saved Views store the filter arrays (older single-string saved views normalize on apply). (The old separate Connection pill was merged away; `showRelConnMenu` state is now unused.) + a **Saved Views pill** (`RelSavedViews.tsx`, Bookmark icon; shows applied view name + blue when active, popup opens left-aligned; saves/applies named views = mode + node filter + connection filter + canvas snapshot [expansions/pins/viewport via the graph's `snapshotRef` capture/restore API], persisted in localStorage `relViews:<module>`; DESELECT via the "Default view" row or clicking the active view again — both call the drawer's `reset` prop = clear both filters + graph mode + bump `relKey`; a hover **Star** on each row marks it the DEFAULT view [amber filled star, key `relViews:<module>:default`] which AUTO-APPLIES on a mount-once effect every time the map screen opens — deleting/unstarring clears it; an **"Update &lt;view&gt;" button** appears in the popup ONLY when the applied view has been EDITED — on open it fingerprints the current state (mode + both filters + expanded nodes + pinned positions, via `viewFingerprint`, raw pan/zoom excluded so no sub-pixel false positives) and compares to the stored view; clicking overwrites that view with `capture()`. The Save input relabels to "Save as new view" while a view is applied. Row polish: the action rail is FIXED size-6 slots using `invisible` not `hidden` so icons never shift on hover; the ACTIVE view = light-blue row fill with NO check icon; all popup tooltips are Radix black-bg — no native `title` attrs). Toolbar RIGHT: view segmented group **Full (`Orbit`) · Tree (`Network`) · Grid (`List`)**, Refresh (re-fits + resets pins), **Download popup** (PDF/Excel/CSV/PNG + password toggle), **Settings → Advanced Configuration** side panel, Full screen. **Advanced Configuration** (`RelGraphConfig`/`DEFAULT_REL_GRAPH_CONFIG` + `config` prop; drawer keeps applied `relConfig` + draft): live **locked preview** (`previewMode` prop = one level, no badges/interactions/controls) + custom Radix sliders (`RelSliderRow` + `@radix-ui/react-slider`: gradient track, value bubble) for Node Distance / Repulsion / Gravity / Min-Max Zoom / Label Width — ALL functional (ring spacing, GROUP_GAP multiplier, spring strength, RF zoom limits, label width); Apply re-layouts WITHOUT resetting expansions/pins. **Grid view** = relationship LIST rows (numbered: source card → dark relation pill → target card) — plain white, no React Flow. The tab fills the viewport (`h-[calc(100%-48px)]`, `min-h-0`) so the canvas (very light gray `bgColor #FAFBFC` + dots) touches the bottom with NO page scroll. **Inside RelationshipGraph:** square blue center node + circular type-ringed item nodes (labels absolute so edges attach to icon centers), name-based `iconForNode()`, wheel+pinch zoom, drag-pan, arrow-key pan, bottom-left d-pad, top-right canvas controls (keyboard-shortcuts popup — ALL keys real: arrows, +/−, F fit, **1/2/3 views, Ctrl+Shift+F fullscreen, M minimap, L legend, R reset layout**, Ctrl+F, Esc). **Node colors are merged into 4 groups** (`typeMeta` in the drawer, key order = legend order): Assets (amber, hardware+software), Users (indigo), CI (pink, `asset` type), Department (green, new `department` RelType) — the 9-option filter stays but maps onto these. Bottom-right: **Minimap** (collapsible card) + **Type legend** (hidden by default; `List`-icon button; derived from `typeMeta` labels) — the two are **mutually exclusive** (opening one closes the other; both toggle icons always visible, active = blue). **Expandable topology:** deterministic mock children (`genChildren`/`hash`; some 20-28-child fans wrap into staggered rings); **node CLICK expands** (and focuses when zoomed out) but **only the minus badge collapses**; count badge on collapsed nodes. Balloon layout (`layoutAll`) = circular per-parent rings sized geometrically + force sim (springs/`cfg.gravity` + disc collision/`cfg.repulsion`), damped de-overlap; **manual drag pins** survive re-layout (overlapping pin resets); group drag carries subtree (center exempt); scale-aware zoom (≤24 fit-all, else focus group). **Hover/click** → animated dashed `#3D8BD0` edges (dash flow ALWAYS travels parent→child — same direction whichever end is hovered) + relation label on the line; **rich hover card** (550ms delay, screen-space, flips below top nodes + clamps horizontally, hover-persistent): type-icon badge + **clickable ID pill/name/↗ → opens that record as a drawer tab** (CI→CMDB, else Hardware; per-item tab memory via DrawerStack), detail rows per type, and a red **"N active issues linked"** strip when the node has open linked records. **Active issues:** `activeIssuesFor(name)` (exported, deterministic ~⅓ of nodes) → those nodes render **solid red** (white icon, red glow; red in minimap too); the hover strip opens **`ActiveIssuesPanel`** (Relations-style pills **All + Request/Problem/Change with counts, 0-count pills hidden**, "Status Not In Closed" removable chip, standard borderless grid, row click → opens the record via `onOpenRelation`). **Add Relationship:** hover "+" badge on every node (and center) → **`AddRelationshipPanel`** (Direct/Inverse toggle, searchable Relation + Target Type selects — the exported `REL_RELATIONS` catalog now holds 40 relations incl. inverse pairs and also feeds the toolbar Connection pill, per-type mock record table w/ checkboxes+search+pagination, standard borderless grid); Add grafts rows into the tree via the `extraChildren` prop (`ExtraRelChild[]` keyed by source node id) with the chosen relation as the edge label, auto-expanding + focusing the source. **Expand direction:** deeper hubs are seeded in an away-side arc and an **outward-cone constraint** (±83° around the parent→node direction, applied each physics iteration BEFORE collision so overlap resolution always wins) keeps expanded sub-groups on the whitespace side — they may slide sideways when crowded but never flip inward; groups of 6+ children still ring their node fully. Final leaf de-overlap: 30 iters @ 0.6 damp, 110px min. **First-level sector pinning (fix for Expand-all overlap):** before the force sim, each first-level branch is given its own angular WEDGE sized by its subtree footprint (blended 0.6 footprint + 0.4 equal-share floor) and its root is PINNED at a radius where the whole footprint fits — so two big adjacent branches can't crowd the same arc; deeper hubs still relax within their wedge. (A full recursive-balloon rewrite was tried and reverted — it spread nodes ~5× too far.) **Curved edges (`FloatingEdge`, mode-aware):** FULL view uses a swirled quadratic Bézier (control point bowed PERPENDICULAR with consistent handedness → pinwheel/spiral, `bow = len*0.22`); TREE view uses `getSmoothStepPath` rounded-elbow org-chart connectors (16px corner radius, source Bottom → target Top). Tree edges carry `data.tree:true`; the relation label rides the curve/bus midpoint. **Mock profiles:** `RelNodeInput` takes an optional `rel` (per-edge relation label) and the graph takes `mockProfile="cmdb"` → `cmdbChild()` generates CI-style names + semantically matching relations (Hosts/Hosted On/Connected to/Send Data to/Impacts/Impacted By/Runs On/Uses/Used By/Users/Depends On) at every depth; only the CMDB drawer passes it.
+- **CMDB header/menu specifics:** the agent-health dot sits BEFORE the `CI-###` id pill (matches Hardware); Barcode/QR buttons were REMOVED from the CMDB header; the 3-dot menu uses a **`cmdb` variant** in `HardwareAssetActionsMenu` (sections: Actions = Ask for Approval/Sync Warranty/Scan Now · Remote = Exclude From Scan · History = Used By/Location History).
+- **CMDB detail page is MAP-FIRST (`CmdbDrawer`):** every CI lands on a **Dependency Map** layout — header bar + full-bleed topology only (no tab strip, no right properties panel, no header action icons). A prominent segmented toggle in the header (**"Dependency Map"** `Network` icon · **"CI Details"** `LayoutGrid` icon — ServiceNow "Dependency Views" pattern) switches to the classic tab layout and back. Driven by `ciView: 'map' | 'details'` (reset to `'map'` per CI in the tab-restore effect); the map content is `renderRelationshipMap()` (the old Relationship IIFE hoisted above the return, `h-full`); the details Main Content Area stays MOUNTED but `display:none` in map view (preserves tab state — and `ciView` is a dep of `calculateTabOverflow` because the strip measures 0 wide while hidden). Topology hotkeys are keyed to `ciView === 'map'`. **CMDB tabs** (details view): Overview · Properties · Hardware · Software · **Running Process** · Approvals · Relations · History — **no Baseline/Financials/Relationship tabs** (clone render blocks are dead code; the Overview "Financial snapshot" card lost its View-more link). **Running Process tab:** searchable standard borderless table (Process Name/Id/Command/Key Parameters/Parent Id/Listening On/Connecting To) over the module-top `RUNNING_PROCESSES` mock (nginx/postgres/redis/Tomcat/dockerd/motadata agent/…). The map uses realistic first-level CI relations (each node in the IIFE's `nodes` array carries `rel`) + `mockProfile="cmdb"`. **Overview KPI grid has NO Baseline Variance card** (removed with its Encryption fallback + `baselineVarianceCount`); order = Warranty · Antivirus · Patches · Software · Compliance · **Approvals** (moved before the Impact card so row 2 stays gapless). The right-panel **Asset** field links to a real asset ref (`AST-4021 Dell PowerEdge R750`), not a CI string.
+- The ticket 3-dot dropdown is `w-[248px]` with `whitespace-nowrap` labels (so "Convert to Service Request" stays on one line).
+- The asset right panel (`TicketPropertiesPanel`, gated on `assetMode`): a **warranty pill** (`warranty` prop) + **Agent Information** block are pinned at the top (explicit, NOT reorderable — Agent removed from Customize Layout, section-order key bumped to `assetPropertiesSectionOrderV3`). Asset Fields has a **View more** toggle with extra fields incl. a **CI** link (`ASSET_MORE_FIELDS` in `AssetFields`; values in `assetState.extra`). Asset-only `users`/`notes` groups in the right rail.
+  - **Software variant** of the panel is opt-in via a `softwareMode` prop (threaded `TicketPropertiesPanel`→`TicketFieldsAccordion`→`AssetFields`): Asset Fields shows **Software Type** (dropdown) and hides CI + View more; the warranty pill is replaced by a **license-expiry pill** (`licenseExpiry` prop); the Users rail icon is hidden. The Software drawer also passes `softwareMode`.
+- Per-module drawer differences (each in its own file): **Software** tabs = Overview · Properties · Consolidated Software · Installation · Meter · Relationship · History (no warranty pill — replaced by a `licenseExpiry` pill, then that too moved into the Overview KPI strip; minimal 3-dot menu = Add Barcode/Archive/Print). **Non-IT** tabs = Overview · Approvals · Relationship · Financials · History (Overview = "Non IT Property Group" section + a 3-KPI card [Warranty Expire/Impact/Approvals] + Financial snapshot/Contracts & Purchases; History has only Audit Trail/Movement/Repair; `nonIt` 3-dot menu). **Consumable** = Non-IT clone; first tab renamed **Overview**, and the old Quantity Details + Allocation tabs are merged into one **"Quantity & Allocation"** tab with a segmented toggle (available-quantity chip + add/`Allocate` button).
+- **Software License detail page** (`SoftwareLicenseDrawer`, cloned from Non-IT): tabs = **Overview · Allocation · Attachment · History** (Approvals/Relationship/Financials removed). Header has a **single bell icon** (all other icons removed) opening a **Compliance Settings** popup (Enabled toggle + Under/Over Utilization Limit + Update). Right panel uses a `licenseMode` prop (threaded `TicketPropertiesPanel`→`TicketFieldsAccordion`→`AssetFields`): title **"License Properties"**, accordion **"License Fields"** showing only **Product** (read-only) + **License Type** (dropdown, `LICENSE_TYPE_OPTIONS`). The License Type drives the Allocation tab: **Single/Volume/Unlimited User** → single **User Allocation** listing; any other type → **Allocation + Installation** segmented toggle (`licenseAllocView`). Overview = 5 colored KPIs (Purchase/Allocation/Installation Count + **Available** = purchased−allocated + **Pending Install** = allocated−installed) + a full-width **Managed Softwares** card of clickable software pills (`MANAGED_SOFTWARES`, click → `onOpenSoftwareAsset` deep-links to that software asset) + a **License Info** section (Purchase/Expiry Date, Cost, Purchase Count, Version, License Key). **Attachment** tab = grid (File Name/Type/Invoice·PO Date/Uploaded By·On/Action[download+delete]) with an `All`-type filter pill + a **+** Add button opening a side drawer (type selector License File/Invoice/Purchase Order → conditional date+file fields). Mock data consts live at module top of the drawer (`LICENSE_ALLOCATIONS`, `LICENSE_INSTALLATIONS`, `LICENSE_USER_ALLOCATIONS`, `MANAGED_SOFTWARES`, `LICENSE_ATTACHMENTS`).
+- **Purchase Order detail page** (`PurchaseDrawer`, cloned from Non-IT): tabs = **Overview · Purchase Details · Conversation · Approvals · Settlements · Audit Trail** (Relationship/Financials removed; tab id `properties`=Overview, plus new `purchase-details`/`settlements`). Header (top-right): link/share/eye icons, **Add Relation**, then a 3-dot menu (the blue Close Order CTA was later REMOVED) (`HardwareAssetActionsMenu` `purchase` variant = **Receive Items · Print**; "Ask for Approval" addition was requested but PAUSED — not yet added). Barcode/QR icons removed. Right panel uses a `purchaseMode` prop (threaded `TicketPropertiesPanel`→`TicketFieldsAccordion`→`AssetFields`): title **"Purchase Properties"** (via `getGroupTitleWrapper`), accordion **"Purchase Fields"** = read-only **Status** (dot, `PURCHASE_STATUS_OPTIONS`) + Order Number + read-only **Cost (INR)** (auto = Total Cost) + Cost Center (`COST_CENTER_OPTIONS`) + Purchase Required By + Purchase Order Date, then **View more** → Owner picker / Vendor (read-only) / GL Code / Print Template / Invoice Received / Payment Status / Total Invoice & Payment Amount. System Fields (now the "System Fields" subsection at the bottom of the Purchase Fields accordion — see the System-Fields bullet in Structure) use `purchaseMode` in `SystemFieldsRenderer` (`PURCHASE_SYSTEM_FIELDS`: Last Updated Date / Received Date / Purchase Close Date / Created By / Last Updated By). **Overview** = 7 icon-badge KPIs: Purchased Items, Total Cost, Paid Cost, Remaining Cost (→ "Extra Paid Cost" purple when paid>total), Vendor (text), **Impact** (pills = Incident/Asset/Contract/Project, sidebar icons, hover popups, → filtered Relations), Approval. **Purchase Details** tab = cards with subtle gradient headers + tinted `size-7` icon badges (`bg-[#3D8BD0]/10`): "Purchase Items" table (Sr.No/Product Name [with package icon badge]/Part Number/Price (INR)/Tax Rate (%)/Ordered Quantity/Received Quantity/Amount [semibold]; "N products" `rounded-sm` pill) + a totals summary reproducing all charge rows (Sub Total/Discount/Total Net/Shipping/GSTT/New Number1213/Buy back item/TEST(100%)/GST(1.80%)/USD/Tax/New Number23, color-coded +green/−red, data-driven from items) ending in a **gradient Total Cost (INR) bar** + Shipping (Truck icon) & Billing (ReceiptText icon) address cards (label `text-[12px] #64748B` / value `text-[13px] font-medium #364658`, matching the Hardware tab) + Terms chips (rounded-full w/ green check) + Signing Authority (rounded-sm avatar). NOTE: a top stat-KPI strip was tried then removed per request. **Conversation** tab = footer has only **Collaborate + Note** (Reply with AI/Reply/Forward removed); All Activities/Technician sub-tabs removed; timeline shows only internal orange Collaborate/Note blocks + runtime entries. **Settlements** tab = segmented toggle (Invoices / Payments, like Consumable's Quantity & Allocation) with plain tables + Add Invoice / Add Payment buttons (gray edit + red delete actions). Shared line items/total live at module top: `PURCHASE_LINE_ITEMS` + `computePurchaseTotalCost()` (Total Net + TEST 100% + GST 1.80%); `RELATED_RECORDS` extended with Asset/Contract/Project.
+- **Header Allocate button (Consumable + Software License):** a blue primary **Allocate** (`h-8 bg-[#3D8BD0]`, the old Close-Order pattern) sits right of Add Relation on the Consumable header and after the Compliance bell on the License header. License → jumps to the Allocation tab. Consumable → opens the **Allocate Quantity side popup** (`showAllocatePopup`/`allocForm` in `ConsumableAssetDrawer`; also opened by the Quantity & Allocation tab's Allocate button): 2-col form = Status* (In Use/Reserved/In Transit) · Quantity* (+ "Available Quantity: 6" hint — keep in sync with the hardcoded totalQty=60/allocatedQty=54) · Allocate To/Location/Department/Target Type/Asset `app-select`s · Description textarea; **Add** (disabled until qty>0) → toast + jumps to the allocations list + resets the form.
+- **Drawer minimize + open-item tabs (ALL 12 drawers):** every detail drawer (Ticket, Problem, Change, Release, Hardware, Software, Non-IT, Consumable, Software License, Contract, Purchase, CMDB) has Windows-style **window controls grouped at the top-RIGHT of the tab header**, in order: **minimize · maximize/restore · close**. (1) **Minimize** = a horizontal line `—` (inline SVG `M5 12h14`) → collapses to the right rail; (2) **maximize/restore** = `toggleDrawerView`, shows a **single square** when in small view (`drawerWidth ≤ 1080`, click → full) and **overlapping squares (restore)** when in full view (click → small); (3) **close** = `X`. The minimize button has a `border-l` divider separating the control group from the tabs. (Earlier the minimize `»` lived at the top-LEFT and only the toggle+close were on the right — they've been consolidated.) Minimized state → thin right-edge rail (`MinimizedDrawerRail`, ~24px, widens on hover) showing each open item as a vertical ID chip stacked from the **top** (`justify-start`); each chip highlight is **inset** (`w-[calc(100%-8px)] mx-auto`, `rounded-sm`) so the active blue / hover gray pill floats inside the bar instead of touching the border. Active highlighted; hover = dark Radix tooltip with `ID — subject`, `side="left"`. Clicking the bar restores the active item; clicking a chip opens that item (`stopPropagation`). While minimized only the slim rail overlays, so the list behind stays clickable; an effect on the active item's `?.id` restores the drawer when a new item opens. The open-item **tab bar uses `DrawerTabStrip`**: fixed-width (170px) tabs, measures its own width via `ResizeObserver` and shows as many as fit, then a **"More (N) ▾"** dropdown (absolute, `right-0`, z-9999) for the rest; the active item is always kept visible. **Tabs are drag-to-reorder** (native HTML5 DnD: `dragId`/`dragOverId` state, dragged tab dims + a blue left drop-indicator on the hovered tab); on drop it broadcasts a **`reorder-drawer-tabs`** CustomEvent with the new id order, which `DrawerStackProvider` applies to the open-item `stack` — so the order **persists across drawer swaps** without threading a prop through all 14 drawers. Patched into every drawer via stable anchors (active-var `.find(...)` line for state/effect; the `if (open… ) return null` early-return for the minimized return; the tab-header div for the strip). The tab header has **no `overflow-x-auto`** (would clip the dropdown). The **tab-bar height is compact**: tabs use `py-2` (in `DrawerTabStrip`) and the window-control buttons use `p-2` (all 12 drawers) → ~36px bar (was ~42px) to give more content space.
+- **Drawer keyboard shortcuts (`DrawerShortcuts.tsx`, ALL detail drawers):** mounted ONCE by `DrawerStackProvider` (so it governs every module's drawer). **Alt-based** combos (Ctrl+W/Ctrl+Tab/Ctrl+L are browser-reserved and can't be intercepted in a web app), disabled while typing in a field, keyed off `e.code` (Alt-robust). Window/tab actions use the host's own state passed as props (`minimize`/`closeActive`/`closeAll`/`nextRecord`/`prevRecord` = `setMinimized`/`closeByStackId`/`closeAll`/`setActiveKey` cycling — same handlers the tab strip UI uses). In-drawer actions are best-effort **scoped DOM triggers** against the visible `[data-drawer]` (graceful no-op if absent): view toggle clicks `button[title*="view"]`, AI focuses the `Ask AI` input, Edit `button[title*="edit"]`, Add Relation/Note by button text, 3-dot by `svg.lucide-more-vertical`, content-tab switch cycles the `py-3 whitespace-nowrap` tab buttons by the active `border-b-2`. Copy ID/link use `navigator.clipboard`. Keys: **Alt+M** minimize · **Alt+W** / **Alt+Shift+W** close tab / all · **Alt+F** small/full · **Alt+]/[** next/prev open tab · **Alt+↓/↑** next/prev record · **Alt+./,** next/prev content tab · **Alt+I** AI · **Alt+C/U** copy ID/link · **Alt+E** edit · **Alt+R** add relation · **Alt+N** note · **Alt+A** actions menu · **?** cheat-sheet popup (themed, lists all). (Open items ARE the records in the stack architecture, so next-record == next-tab.)
+- **Cross-module drawer host (`DrawerStack.tsx`):** a single React Context (`DrawerStackProvider`, wraps everything in `App.tsx`) owns the **open-item stack across ALL modules** and renders whichever module's real drawer matches the active tab — so clicking a related item (Relations tab, or an "Open related records" Impact popup) opens the **actual other-module detail page** as a tab in the same drawer, not just a swapped id/subject. `open(module,id,subject,data)` pushes to the stack (dedupe by `${module}:${id}`); `openRelation(rel)` maps a relation type → module + a **lazy** mock-pool getter (`REL_MAP`, lazy to avoid circular-import init errors since list pages import this module) and seeds realistic data. **List pages** call `useDrawerStack().open(...)` in their `handleOpenX` (their own `<XDrawer>` still renders but with empty arrays → returns null). The host passes a shared prop bag to the active drawer: `stackTabs` (unified tab list), `onCloseTab`/`onTabChange`/`onClose`, `onOpenRelation`, plus two **lifted-state** props so behavior persists when the host swaps in a different module's drawer instance: **`stackWidth`/`onStackWidthChange`** (full vs small view — each drawer inits `drawerWidth` from `stackWidth` and reports toggles back, so closing a tab keeps the current view instead of resetting to full) and **`stackMinimized`/`onStackMinimizedChange`** (each drawer's local `minimized` defers to the host: `const minimized = stackMinimized ?? minimizedLocal`). A third lifted pair **`stackActiveTab`/`onStackActiveTabChange`** (per-item `tabByKey` map in the host, keyed `module:id`) restores each open item's detail tab when you return to it — currently wired into `HardwareAssetDrawer` + `CmdbDrawer` (their "default to Overview" effect reads it; a `tabInitRef` guard stops the programmatic set echoing back). A fourth lifted pair **`stackActiveGroup`/`onStackActiveGroupChange`** keeps the RIGHT-PANEL group (Properties/Activity/Suggestions/…) open when a related record opens as a new tab — Ticket/Problem/Change/Release defer via `const activeGroup = stackActiveGroup ?? activeGroupLocal` and their "reset to properties on record change" effects were made LOCAL-only (`setActiveGroupLocal`) so they never clobber the shared group. The provider takes `activePage` and an effect **minimizes the open drawer whenever you navigate to another module's list page** (so the list is visible behind the slim rail); `open()` clears minimized, so clicking any list/related item restores the drawer. Threaded into all 12 drawers via node sweeps against identical anchors (interface props, destructure, `drawerWidth` init + first-open effect, `minimized` state line).
+- **Drawer tab hover card (`DrawerTabStrip`):** hovering any open-item tab shows a white Radix tooltip card with **ID · subject · technician · status dot · priority dot**. `stackTabs` (in `DrawerStack`) is enriched via a generic `tabMeta(data)` extractor that reads `status`/`priority` and a technician from whatever field the module uses (`assignedTo.name`/`assignee`/`managedBy`/`owner`/`usedBy`/`technician`). Dot-color helpers live in `DrawerTabStrip`.
+- **Header polish (ALL 12 drawers):** the subject `<h1>` gets an **ID pill** before it (`rounded bg-[#e8f4fd] text-[#3D8BD0]`; on Hardware/CMDB it sits after the agent-health dot). The header action icons (Copy ID, Copy URL, Watch/Eye) are **boxed** like Edit (`h-8 w-8 border border-[#DFE5ED]`); the **Share icon was removed**. **Copy ID / Copy URL** use a shared `HeaderCopyButton` (green ✓ "Copied!" feedback that reverts after ~1.6s; catches the clipboard promise rejection).
+- **Shared rich-text composer editor (`EditorToolbar.tsx`) — Reply / Forward / Collaborate / Note / Reply-with-AI, all 12 drawers:** a decluttered Gmail/Outlook-style editor. Row 1 = `EditorQuickActions` (AI Assist · Insert from Template `LayoutTemplate` · **Insert Knowledge `Lightbulb`** · Attachment · Image · Link · Emoji · **Text-formatting toggle** + separator + Undo/Redo). Toggling text-formatting reveals `EditorFormattingRow` — a **floating** (`absolute bottom-full`, so editor height never jumps) row with a compact **A✎** text-style dropdown (Paragraph/H1-3), B/I/U, numeric **font-size** menu (Default/8/10…72, 100px wide), Align dropdown, Bullet/Numbered lists, separate **text-background** + **text-color** Gmail-style grids (tick on selected), separator, Table. **ALL controls are functional** via `document.execCommand` + `queryCommandState` for Gmail-style active states. `RichComposerArea` = uncontrolled contentEditable (mirrors external value only when unfocused → fixes caret-reset/reversed-typing). **Auto show/hide** on text selection (`autoOpenedRef` + `selectionchange`). To/Cc are chip inputs (`EmailChips`). Send/Save-as-Draft are **icon-only** (`EditorSendActions`: filled-blue `SendHorizontal` + bordered Save). ⚠️ Composer cards must NOT be `overflow-hidden` (clips the upward font-size/color menus) — the gray header carries its own `rounded-t-[6px]` instead; `[contenteditable]` list-style/heading CSS lives in `theme.css` (Tailwind preflight strips it).
+- **Requester Conversation tab (Ticket only):** the Conversation area now has THREE sub-tabs — **All Activities · Technician · Requester** (labels shortened from "Technician/Requester Conversation" so the row + Search/Filter/Sort icons fit on one line in small view; the other drawers' 2-tab conversation rows use "All Activities · Technician" too) (`activeConversationTab: 'all' | 'technician' | 'requester'`). Public/requester-facing blocks are gated `!== 'technician'` (show in All + Requester); internal-note blocks gated `!== 'requester'` (show in All + Technician); runtime `sentConversations` filtered by `type` (note/collaborate = internal, reply/forward = public).
+- **Tasks tab — Service Catalog Task stages (`TasksTabContent`):** when tasks carry a `stage` index, the tab shows a **single "Service Catalog Task" accordion** (title admin-defined; `X/N Stages` badge) containing a **"Task Summary" step selector at top** (all stages as clickable pills = number badge + `done/total`, **no stage names**, active one blue) showing **one stage's tasks at a time** (Approval-levels pattern). **Manually-added tasks (no `stage`) render in an "Additional Tasks" list OUTSIDE the accordion.** Falls back to a flat list when no task has a stage (other modules). Task cards were decluttered: TA-id chip + subject on one line, a compact inline meta row (`TaskCardFields`: status·priority·assignee·due-date as editable chips, labels removed → shown as `title` hover tooltips, chevrons only on hover) that shows a **start → end date range** when both dates differ. `TicketDrawer` seeds `DEMO_STAGED_TASKS` (13 onboarding tasks across 4 stages) so the feature is visible; new tasks default to no-stage → Additional Tasks. **Per-request seeding (`seedTasksFor(id, subject)` in `TicketDrawer` + `TicketDrawerV2`):** ONLY the Service Request **INC-35** gets the staged Service Catalog accordion; every other request gets **3-4 individual (no-stage) tasks whose NAMES match the request SUBJECT** — `TASK_THEMES` maps subject keywords → a themed step list (connectivity / hardware-fault / procurement / onboarding, else `GENERIC_TASKS`), picked deterministically by an id hash, with a Closed→In Progress→Open progression. Reseeds on the active record's `subject`.
+- **Audit Trail redesign (`AuditTrailsTabContent` for Ticket/Problem/Change/Release; and the History-tab "Audit Trail" category in all 8 asset/procurement drawers):** entries **grouped by day** (weekday-date header), **time shown inline** next to the event (`🕐 h:mm AM/PM`, no longer far-right), action as a subtle pill, before→after values as clean inline chips (`field  old → new`), connecting timeline line, generous per-entry spacing (`py-3.5`). A toolbar has **Filter** (From/To date popup → Apply/Clear, functionally filters entries, icon highlights when active) and **Download** (popup: PDF/Excel/CSV segmented + polished green **Password Protected** toggle → conditional Attachment Password field with eye toggle → Download/Cancel). The asset History versions were added via node sweep (strip weekday via first comma for date parsing — **avoid regex backslashes in bash heredocs**, they get stripped; write the sweep script with the editor instead).
+- **Approval comments popup (`ApprovalCommentPopup`):** clicking the chat icon on an approval card opens a right-side Comments panel. Sending a comment now **stores it and keeps the popup open** (was closing + losing it); comments render as **orange Note-style blocks** (`bg-[rgba(245,133,24,0.10)]` + `border-l-2 border-[#F58518]`) with an **Internal** pill ("Not Visible to Requester"). A **search + sort** toolbar (search comments, ArrowUpDown toggles newest/oldest). The editor is a **single uncontrolled `contentEditable`** — do NOT re-write its HTML via `dangerouslySetInnerHTML` while typing (that reset the caret → reversed/RTL text). The editor wrapper must NOT be `overflow-hidden` (clips the AI-Assist dropdown that opens upward).
+- **Approvals tab accordions are MULTI-OPEN** (`ApprovalsTabContent`): `expandedApprovalIds` is a `Set` (opening one no longer closes others) and the Level tab selection is **per approval** (`selectedLevels` map keyed by approval id — a single shared `selectedLevel` would switch levels in every open card). Expanding still auto-lands on the first incomplete level. **Approval card 3-dot menu** order: **Refer back · Ignore · Remind · Delete**. **Similar Tickets** accordion (right panel): the **Linked tab was removed** (only the Similar list remains); the **"+" buttons on Similar Tickets & Suggested Knowledge headers were removed**.
+- **SLA Status card (`TicketPropertiesPanel`, shared):** compacted — header keeps `p-4` (matches other accordions) but content is tighter (`px-4 pb-4 space-y-2`, 12px labels, `py-0.5` pills, hourglass icons `10×13`). Each SLA row label (First response / Resolution / OLA) has a **hover pencil** (`group/sla` + `group-hover/sla:opacity-100`). Work Tracker's **Start Timer popup** gained a **Technician selector** (default current user) so a timer can be started on behalf of another person; the tracker card + saved work log use the chosen technician. Right-panel action buttons (SLA History / Work History / Add Tracker) are the same size (`px-3 py-1.5 text-[12px]`); **Add Tracker is a filled blue primary**, Work History a bordered secondary.
+- **Two-line header KPI row (ALL detail drawers):** under the subject `<h1>`, each drawer renders a compact, single-line KPI strip (the old "Created at … (N days ago)" line is folded into it as a `Created` chip). Pattern per chip: `<span className="inline-flex items-center gap-1.5">` → optional colored `size-2` dot → `text-[11px] text-[#7B8FA5]` label → `text-[12px] font-medium` value; chips separated by `<span className="h-3 w-px bg-[#E5E7EB]" />`. Per module: **Ticket** Status·Priority·Assignee + SLA Due (incident) / Approval (SR); **Problem** Root Cause·Affected·Workaround; **Change** Type·Scheduled; **Release** Type·Go-Live; **Hardware** Status·Used By·Warranty·Impact·Managed By; **Software** Status·Compliance·Utilization·License Expiry·Impact·Managed By; **Non-IT** Status·Warranty·Book Value·Impact·Managed By; **Consumable** Status·Stock·Available·Impact·Managed By (Stock/Available derived from the SAME hardcoded `totalQty=60`/`allocatedQty=54` the Overview "Quantity & Allocation" cards use, so header and Overview agree); **Software License** Compliance·Utilization·Available·License Expiry·License Type (all derived from real `purchaseCount`/`allocationCount`/`installationCount`/`expiryDate`/`licenseType`; Compliance = util>100 Over-utilized / <60 Under-utilized / else Compliant, "Not Tracked" when the compliance toggle is off; **License Expiry only shown when ≤30 days or Expired**; the Overview Utilization card was made data-driven to match); **Contract** Status·Expires·Vendor·Cost·Type (real `status`/`endDate`/`vendor`/`cost`/`contractType`; **Expires only shown when ≤30 days or Expired**; Overview "Contract Expires" card + its AI answer made data-driven from `endDate` to match; vendor `VEN-##:` prefix stripped); **Purchase** Status·Required By·Outstanding·Total Payable·Vendor (`status` colored via `PURCHASE_STATUS_OPTIONS`; **Required By always shown**, color-coded Overdue red / ≤14d amber; Outstanding = `computePurchaseTotalCost − PURCHASE_PAID_TOTAL`, green "Settled" when ≤0; vendor `VCAT-##:` prefix stripped). Several mock `expiryDate`/`endDate` values were set within ~30 days of "today" to demo the near-expiry chips. ⚠️ Day-counts use the **real `new Date()`**, so they shrink over time and eventually drop off — anchor to a fixed date if perpetual "near" demos are needed.
+- **Right-panel "Activity & Resources" group** is renamed **"Attachments"** and its **Work Tracker accordion is hidden** on the 5 asset pages (gated on `assetMode`); the rail icon becomes a **paperclip** (vs Activity for tickets). The Properties-group icon **tooltip now matches the group title** via a `propertiesTitle` prop each drawer passes ("Ticket Properties"/"Properties"/"Asset Properties"/"License Properties").
+- **Per-asset Impact KPI** (Hardware/Software/Non-IT Overview): counts derive from a hash of `activeAssetId` so each asset shows a different pill set (1–4); zero-count types are hidden, the whole card hides when all zero, and it spans 2 columns at 3+ pills. Compact pills (icon badge + count + label) navigate to filtered Relations and show a hover popup of related records (id/subject/assignee/status dot/priority dot). **Impact pills use the same icons as the sidebar modules** (`IconRequest`/`IconProblem`/`IconChange`/`IconRelease`, and `IconAssets`/`IconProject`/`ShoppingCart` for Asset/Project/Purchase) so the visual language matches the nav; a colored **severity dot** precedes the priority value (High red / Medium amber / Low green). Asset Overviews use Incident/Problem/Change/Release; **Purchase** uses Incident/Asset/Contract/Project; **Contract** uses Incident/Asset/Purchase.
+- **KPI cards use the icon-badge style** across all Overviews: tinted `size-7` rounded badge (`${color}1A` bg) + label + colored value, hover border/shadow. Value font is **20px in wide view / 18px in narrow view** (`drawerWidth > 1080`), one step smaller than before; grid is 3-per-row wide / 2-per-row narrow.
+- **"Request" terminology (Ticket detail page V1 AND V2):** every USER-VISIBLE "Ticket" on the ticket/request detail page reads **"Request"** — Request Properties, **Request Fields** (`fieldsTitle` default in `TicketPropertiesPanel`+`TicketFieldsAccordion`), Similar Requests, Find similar requests, **Request Transition** (menu + `TicketTransitionModal`), the onboarding tour, SLA-history subtitle, the ServiceOps-AI canned texts + action keys (`Find Similar Requests` / `Resolve Request` / `View Request Details`, renamed consistently across ALL drawer clones that call them), and search placeholders. INTERNAL identifiers kept as-is (localStorage `ticketPropertiesSectionOrder` keys, `IncidentDetailsTabV2` section anchors, `ticketId` props). Problem/Change/Release pages were NOT renamed (out of scope). ⚠️ It's a large sed-style sweep — re-check the phrase before assuming a given "Ticket" string is already renamed.
+- **Hardware Overview Antivirus KPI shows the product name**: the AV card carries an optional `note: 'CrowdStrike Falcon'` rendered INLINE to the right of the "Active" value (baseline-aligned, `flex-wrap` so a long name drops below only when it can't fit) — keeps the card height matching its neighbours. Only the AV card sets `note`; other KPI cards are unaffected.
+- **AI-suggested actions on Overview KPI cards** (Hardware Warranty/Antivirus/Patches/Baseline/Software/Compliance; Software License/Compliance/Patch/Utilization/Expiry; Non-IT Warranty): hover reveals a gradient `rounded-sm` "✨ <action>" pill; clicking calls `quickActionHandlerRef.current(question, answer)` which opens the ServiceOps AI chat with a tailored answer. `handleQuickAction(actionType, customResponse?)` in `TicketPropertiesPanel` now accepts a custom answer; the ref type is `(actionType, customResponse?) => void`.
+- **Asset Overview tabs are header-less:** the section group titles were removed across Hardware/Software/Non-IT/Consumable, and the long description paragraph above the tabs was removed in all asset drawers (tabs sit directly under the header). Overview KPI strips (gray cells, dots, optional `counts`) cap at one row; the **Impact** KPI's Incident/Problem/Change/Release counts and the **Active Contracts/Active Purchases** cards are clickable → open the Relations tab pre-filtered via `relationsInitialFilter` + `RelationsTabContent`'s `initialTypeFilter` (Incident maps to relation type `Request`).
+- **Users group** in `TicketPropertiesPanel` is an **accordion**: collapsed row = avatar · name · status badge · department, with Edit/Delete shown on hover inline left of the chevron; expanded reveals Account Type / Domain / Security ID / Description (`expandedUsers` Set). Uses realistic local-account names.
+- Asset header (top-right): **Barcode** and **QR Code** buttons (hover/click dropdowns) sit left of **Add Relation**. The 3-dot `HardwareAssetActionsMenu` has variants via props: full (hardware), `minimal` (software), `nonIt` (non-IT/consumable); **Add Barcode** opens a small popup.
+- The software/application icon is `AppWindow` (lucide) across list tables and detail drawers — not the generic `Package` box.
+- Shared-component customization pattern: add an optional prop (e.g. `showSla`, `fieldsTitle`, `assetMode`) with a default that preserves existing behavior, then opt-in from the specific drawer.
+- All data is mock/in-component. Selections in detail drawers are local React state (prototype behavior), not persisted.
+- Asset list IDs by module: Hardware `AST-###`, Software `SWAST-#####`, Non-IT `NON-####`, Consumable `CON-0000070##` (all mock, in each `XListPage`).
+- The Customize Layout section order persists in `localStorage` under a per-module key (`ticketPropertiesSectionOrder` / `changePropertiesSectionOrder` / `assetPropertiesSectionOrderV3`) so layouts don't leak across modules.
+- Container queries (Tailwind v4 `@container` + `@xl:`/`@4xl:` variants) drive the Software card grid (responds to the drawer width, not the viewport; capped at 3 columns).
+- Verify changes with `npm run build` (no standalone typecheck script; TypeScript isn't installed globally). Note: edit files with the proper tools — a PowerShell `Get-Content`/`Set-Content` round-trip can corrupt the UTF-8 em-dashes (—) in asset names.
+- ⚠️ **This project's `node_modules` is pnpm-managed** — `npm install <pkg>` CRASHES with "Cannot read properties of null (reading 'matches')" on the pnpm tree. Install new dependencies with **`pnpm add <pkg>`** (pnpm 11 is available).
+- `main` is the deploy branch — pushing to it auto-deploys via GitHub Actions to the live URL.
+- **Header Edit icon (all 12 drawers):** a square-pen `Edit` icon button sits left of **Add Relation** (left of the Compliance bell on the License page). Styled `inline-flex h-8 w-8 bg-white border border-[#DFE5ED] rounded` so it matches the 32px Add Relation height (`h-8` = border-box 32px). Visual-only (no handler).
+- **Header control heights are all uniformly 32px (`h-8`):** the **3-dot menu** triggers (`TicketActionsMenu`/`ChangeActionsMenu`/`ProblemActionsMenu`/`ReleaseActionsMenu`/`ActionsMenu` + `HardwareAssetActionsMenu` for the 8 asset/procurement drawers) are now **boxed** (`h-8 w-8 border border-[#DFE5ED]`, was unboxed `p-1.5`). The **Add Relation** and **Status** split-buttons had `h-8` pinned on the wrapper and `py-1.5` removed from the inner buttons (they were ~30/34px). Asset **Barcode/QR** buttons went from `p-1.5` to `h-8 w-8`. (The many drawer-*internal* `p-1.5 hover:bg-[#f9fafb]` icon buttons in conversation/content areas are intentionally left alone.)
+- **Change/Release header status dropdown shows the lifecycle stage:** the split-button dropdown maps `changeStageStatus.options` (labels `"<Stage>: <Sub>"`) — NOT the generic `statusOptions` — so selecting a status keeps its stage prefix (was dropping it → stage hidden). The current stage name shows as a small gray section header (`text-[11px] text-[#7B8FA5]`, like the AI-Assist dropdown section labels) at the top of the dropdown. ChangeDrawer + ReleaseDrawer.
+- **AI Summary KEY POINTS bullets** in Ticket/Problem/Change/Release use a **purple dot** (`<span className="mt-[7px] size-1 rounded-full bg-[#8B5CF6] flex-shrink-0" />`) — not the old blue `•` glyph (which misaligned). `AssetAiSummary` uses the same dot.
+- **Asset Overview AI summary (`AssetAiSummary`):** no "AI Summary" heading — just a Sparkles icon + 1-2 line summary + purple-bullet points, on a lavender-gradient card at the **top of the Overview tab** for Hardware/Software/Non-IT/Consumable/Software License/Contract/Purchase. ⚠️ **Tab gotcha:** Hardware/Software default to `activeMainTab === 'overview'`; **Non-IT, Consumable, License, Contract, Purchase default to `'properties'`** (their `'overview'` block is dead clone code). Put Overview content in the block matching the drawer's default tab.
+- **50+ demo custom fields (ticket page only):** `DEMO_CUSTOM_FORM_FIELDS` in `demoCustomFields.ts`, rendered in Additional Fields → Form Fields, gated by a `demoCustomFields` prop threaded `TicketDrawer`→`TicketPropertiesPanel`→`AdditionalFieldsAccordion`. Collapsible (View more reveals all after the first 6), **pinnable** (`PinnedFieldsAccordion` resolves custom values when `value === '-'`), **searchable** (`getSlaPenaltyAmount`'s sibling `hasAdditionalFieldsMatch` in TicketDrawer also matches these), values truncate (`min-w-0`). Includes a read-only one-line **Description** field whose expand button opens `DescriptionExpandModal` (textarea + reply-style decorative toolbar).
+  - **Grouped by admin separator:** each field carries a `group` (8 groups: Requester Details / Location & Workplace / Asset & Network / Service Details / Approval & Priority / Finance & Procurement / Contact Preferences / Compliance & Security). The accordion renders a group header (full-width hairline `border-t` + generous whitespace + uppercase **12px dark `#1E293B`** title) whenever the group changes — clean settings-style sections, not a flat wall. The 5 built-in fields (Project Name/Cost Center/Business Unit/Building/Request Channel + Description) stay ungrouped at top.
+  - **All custom fields are EDITABLE** (they're user-created, not system): each renders as an inline editable input in the accordion (plain-text look; gray hover fill + blue focus ring; color dot stays on the left). Edited values live in `customFieldValues` state (mock data = default via `customVal(label, fallback)`).
+  - **Expand-fields popup:** a Maximize2 icon at the right end of the Form-Fields/System-Fields tab row opens a centered 720px modal showing ALL fields **two-per-row** (bordered inputs, base fields as real dropdowns w/ color dots, Description a full-width textarea, custom fields under their group titles at **14px**). Edits go to a **DRAFT** (`draftFields`, seeded on open); a **sticky footer** has **Update** (commits draft → accordion via `applyExpandFields`, sonner toast "Form fields updated") + **Cancel** (discards).
+  - **Additional Fields sticky header:** the accordion HEADER (title row) is `sticky top-[85px] z-40 bg-white` inside `AdditionalFieldsAccordion`, so "Additional Fields" pins just under the panel's sticky search header (86px tall) while the long field list scrolls beneath it in the common right-panel scroll. (An internal-scrolling variant — capped `max-h` + `overflow-y-auto` on the accordion bodies — was tried and REVERTED per feedback; the field lists scroll with the panel.) ⚠️ Sticky gotcha if revisited: Tailwind v4 `space-y-*` puts `margin-bottom` on non-last children and sticky clamps the MARGIN box, leaving a stuck card shy of its pin by exactly that margin. ⚠️ Tradeoff: `overflow-y-auto` clips field DROPDOWNS that open past the 420px boundary (they can't escape the scroll box) — acceptable for the prototype; portal the menus if that becomes an issue.
+- **SLA penalty:** `getSlaPenaltyAmount(id)` + `formatPenaltyAmount` in `TicketDrawerUtils` (`$0` for on-track INC-32, `$250` otherwise). A **Penalty row** on the SLA Status card shows only when `> 0`; the same value is passed to `SLAHistoryModal` via a `penaltyAmount` prop so card + history stay in sync. Ticket/Problem/Change/Release.
+- **Ticket Transition modal (`TicketTransitionModal`, Ticket only):** opened from the ticket 3-dot menu's single **"Ticket Transition"** item (merged the old "Status Transition" + "Assignment Transition"; wired via `onOpenTicketTransition` in `TicketActionsMenu` → `setShowTicketTransition` in `TicketDrawer`, passing `ticketId`/`penaltyAmount`/`status`). Right-side drawer (`w-[880px]`) with 3 tabs using the same styling as the main ticket tabs: **Overview · Status · Assignment**. Overview = "Time Elapsed Analysis" (Total Time Elapsed card w/ current-status pill) + an **"SLA Status"** section of full-width flex KPI cards (`SlaCard`, `flex-1 basis-0`) that grow to fill 1–4 across. Status/Assignment tabs use `TransitionSection` = a clickable `TimeDistribution` bar (click a segment/legend → filters the `Timeline` below via `rows.filter(r => r.from===filter || r.to===filter)`, dimming non-selected). All mock data (`STATUS_SEGS`/`TECH_SEGS`/`GROUP_SEGS` + `*_ROWS`) totals a consistent "4 days 11 hours". Bar-segment hover uses the styled black Radix tooltip.
+- **SLA outcome model (closed vs running) — shared across the Ticket Transition Overview AND the right-panel SLA Status accordion (`TicketPropertiesPanel`):** a `slaClosed = /closed|resolved|completed/i.test(status)` flag drives it. **Running** rows read `First response — Met`, `Resolution — Breached` (was "overdue in"; Breached when `getSlaPenaltyAmount>0` else Met), `OLA due in` (OLA is **never "Met" while open** — only "due in"/Breached); the outcome word is merged inline after the SLA name in the **same `#364658` label color** (NOT a colored pill). **Closed** rows show `OLA — Met` too and swap the pill value to the **time taken**. The right pill keeps the **same hourglass design/color in both states** (green/red/amber), only the time value changes. Each pill's hover is a **left-aligned, divider-separated (`divide-y divide-white/15`) tooltip** with 3 rows: completion/due date · **Total time** (the defined SLA target) · **SLA Name** (e.g. "P1 Critical – Response SLA"). ⚠️ **OLA total time must always exceed Resolution's** (currently OLA = "1 week"; Resolution = 3 days closed / 5 days running).
+- **Global tooltip delay:** `TooltipProvider` default `delayDuration` is **700ms** (in `ui/tooltip.tsx`) so every Radix tooltip in the app waits ~0.7s before showing (was instant `0`).
+- **Service Request "Change Item":** the SR catalog-item 3-dot menu (TicketDrawer) shows **Edit + Change Item** (Delete removed). Change Item opens the Service Catalog and **replaces** the item in place (tracked by `changingItemId`); the catalog confirm button reads "Change Item" vs "Add to Request".
+- **Work Tracker:** the `+` opens `AddWorkLogModal` (Technician half-width select, Start/End native date pickers styled like the asset date fields, Description); **Work History** opens `WorkHistoryModal` (table: Technician/Start/End/Time Taken/Description/Actions). Add appends; edit reopens the modal titled "Edit Work Log"/"Update"; delete removes. State lives in `TicketDrawer` (`workLogs`). Ticket only.
+- **Relations filter pills:** `RelationsTabContent` shows one pill per relation type **that has data** (with a count), next to an always-first **All** pill, in wide view; in narrow view (container query `@2xl` on the filter row) it falls back to the original **All ▾ dropdown**. Clicking a pill sets `typeFilter`.
+- **Email Notifications group (Ticket/Problem/Change/Release/Contract/Purchase):** a **Bell** icon is the last icon in the right rail (gated by a `showNotifications` prop; `activeGroup` union extended with `'notifications'` in the panel AND each drawer's `useState`). Empty state = Mail icon + "No Notifications Yet" + Send Email button; once emails exist a **+** appears right of the "Notifications" title (like the Users group) and the in-card button is removed. `SendEmailModal` = chip-input recipients (type + Enter/comma → pill, like the Contract Expiry Reminder), Technician/Requester group `<select>`s, Subject (prefilled `[ID]: `), rich-text Email content, **file attachments** (`<input type=file>` → name/size chips). Sent emails render as **collapsible cards** in `NotificationsPanel` (collapsed = sender+time header + Subject; expanded = To/Subject/Groups/Content/Attachments); **To** shows 2 emails + a `+N` badge with a black tooltip listing the rest; attachments have view (`AttachmentPreviewModal`) + download icons. Emails are local panel state (not persisted).
+- **Integration (Jira) group — Ticket only:** a **Blocks** icon at the end of the right rail (gated by `showIntegration` prop, passed only by `TicketDrawer`; `activeGroup` union in panel + `TicketDrawer` extended with `'integration'`). A record links to at most ONE Jira issue → starts with a blank empty state (Blocks icon + "No Integration Yet" + Add Integration button, like Notifications). Add Integration opens a right-side drawer (Subject input, static Description, Project/Issue Type/Priority `<select>`s, Add/Cancel; Add button `rounded-md`). Once added, shows a single expandable card (Jira ID/Project/Issue Type/Priority/Subject/Application) with the real **Jira logo** (3-chevron SVG `#2684FF`), hover-delete clears back to empty. State is local in `TicketPropertiesPanel` (`integration`, `showAddIntegration`, `intg*` fields, `saveIntegration`).
+- **Similar Tickets type filter + open-in-drawer:** the Similar Tickets accordion (`TicketPropertiesPanel`, suggestions group) has **All · Request · Problem · Change** filter pills (`rounded-sm`, live counts, active = blue). Driven by `similarFilter` state filtering `availableSimilarTickets` by a new `type` field (mock data in `TicketDrawerUtils` now includes Request/Problem/Change rows: `PRB-4412`, `CHG-2091`). **Clicking a card opens that record as a tab in the same drawer** — a new `onOpenRelation` prop on `TicketPropertiesPanel` (threaded from `TicketDrawer`) routes through `DrawerStack.openRelation` using the item's `type`, so REQ/PRB/CHG items open their real module's detail page; the Link icon still links separately (`stopPropagation`).
+- **Right-rail Keyboard-shortcuts button:** the cheat-sheet opener lives at the BOTTOM of the right icon rail (`mt-auto`, plain rail styling — no shadow) in `TicketPropertiesPanel`; it dispatches a `open-drawer-shortcuts` CustomEvent that `DrawerShortcuts` listens for. (The old `position:fixed` floating button was removed — it overlapped the topology fullscreen + CMDB map controls.)
+- **Global `.app-select` class (`theme.css`):** consistent native `<select>` styling — removes the OS dark arrow and paints a light-gray lucide-style chevron inset at `right 0.75rem` (+ reserved padding). Applied to all 21 standalone form selects (Add Integration, the Add Cost/User/etc. side drawers across the 8 asset/procurement/CMDB drawers). The 16 compact "unit" selects joined to inputs (`border-l-0 rounded-r-md`) are intentionally left native.
+- **Conversation email polish (11 drawers with the conversation clone):** the trimmed/quoted message (••• toggle) shows a full email header — **From · Date · To · Subject**. Every email address in the conversation headers ("Forwarded to …"/"Replied to …"), their black recipient tooltips, and the trimmed To line is wrapped in **`CopyableEmails`** (splits text on an email regex; each address = hover-underline span, click → clipboard + sonner toast, `stopPropagation`). ~195 wrapped text nodes, swept by regex `>(text with @motadata.com)<`.
+- **Tasks tab sort icon:** `TasksTabContent` toolbar has an **`ArrowUpDown`** sort button right of the filter icon (same icon as the Conversation tab); toggles `taskSortDesc` which reverses `sortByOrder` across all stages + the additional-tasks list.
+- **Auto-hide scrollbars (global):** `theme.css` styles Tailwind's overflow utilities (`.overflow-y-auto`/`.overflow-auto`/`.overflow-x-auto`/`-scroll`) so the scrollbar thumb is TRANSPARENT until the scroll area (or something inside it) is hovered — fixes multiple scrollbars showing at once. Gutter stays reserved (thin, `#CBD5E1` on hover).
+- **Software asset Consolidated Software + Installation tabs — card/list view toggle** (`SoftwareAssetDrawer`, like the Hardware Software tab): both default to **card** view with a grid/list toggle button (`LayoutGrid`/`ListIcon`) at the far right of the toolbar (`ml-auto`). Card = icon + **ID pill on top, name/host subject below** + a 2-col details grid; Consolidated card shows Asset Type · Status · Version · Software Type · Managed By Group · Managed By (NO Created Date); Installation card shows Asset Type · Status · IP Address · Used By · Managed By Group · Managed By (NO Host Name — it's the title — and NO Created Date). Grid is container-query responsive (`@container` + `@xl`/`@4xl` 1→2→3 cols). The **Software Type** field is a borderless hover-gray dropdown (`renderSwType(rowKey, up)` helper — Managed/Discovered/Unmanaged with check; chevron shows on hover only) shared by card + list. States: `consolidatedView`/`installationView`/`consolidatedSearch`/`consolidatedTypes`/`openTypeRow`.
+- **Purchase Order header:** the blue **Close Order** CTA was REMOVED from `PurchaseDrawer` (header is now link · edit · Add Relation · 3-dot menu).
+- **Attachment preview:** Eye icon → `AttachmentPreviewModal` (centered popup, image-mock for image extensions, document-mock otherwise) — used in the right-panel Attachments list and in notification-card attachments. Self-contained inline SVG (no real files in this prototype).
+- **Inline description images:** `DescriptionInlineImage` (an inline SVG network-diagnostics diagram) is embedded mid-body in long 12-paragraph descriptions on Ticket INC-32 and the Problem/Change/Release default descriptions — demoing Word-pasted text+image. Renders inside the description `<p>` via `<span>`s (valid phrasing content).
+
+- **Patch detail page (`PatchDrawer`)**: tabs = **Overview · Vulnerabilities · Endpoint · Deployment · Superseded · Audit Trail** (tab ids `properties`/`vulnerabilities`/`computers`/`installation`/`superseded`/`audit` — Endpoint/Deployment are `tabLabels` renames of computers/installation). Header: stateful **Approve / Decline** buttons (both show while undecided; after deciding only the opposite action remains — `patchDecision` map), no Add Relation/Barcode/QR; header KPI strip = **Category | Severity | Approval Status | Release Date | KB Number** (KB parsed from the patch name, date shortened). Audit Trail = History clone with only the Audit Trail category (type dropdown removed). The 3-dot menu uses the `patch` variant of `HardwareAssetActionsMenu` (**Deploy Patch · Download to File Server** only). Right panel via **`patchMode`** (threaded `TicketPropertiesPanel`→`TicketFieldsAccordion`→`AssetFields`): title "Patch Properties", ONE fully **read-only Patch Fields** accordion (`PATCH_FIELDS`, all fields shown by default — no Additional Fields accordion, no Customize Layout, no System Fields) with ONE editable exception: the shared **Tags chip row is spliced in right after "Refrence Url"** (search-"tags" fallback included); the panel's field-search row has **NO filter icon** on any patch-family page (`patchMode` gates it off — patch/deployment/endpoint); rail groups **Affected Products** (`Layers` icon) + **File Details** (`Files` icon) replace Notes/Attachments — data shared with the Overview cards via `PatchPanelData.ts`. ⚠️ `PATCH_AFFECTED_PRODUCTS` is **single-type by design** (a patch targets EITHER OS editions OR an application, never both); the panel rows show the type as a small gray SUB-LINE under each product name (matching the Overview preview card), header = plain count. The Affected Products panel opens with ONE compact meta line — **"N products affected · Supported Languages: all"** (count bold/prominent, language a light trailing note after a dot; shared, so it shows on Patch + Vulnerability which both use `patchMode`). The Patch Overview donuts also go **full-width 1-up in the small view** (`grid-cols-1` narrow) — same on `PatchDrawer`, `EndpointDrawer`, `VulnerabilityDrawer`.
+- **Patch Overview tab**: optional **Description card** (`Patch.description`, 2-line clamp + View more/less, reset per record; card absent when the patch has none) above a 6-track KPI grid — three **donut-gauge cards** (`col-span-2` each: Vulnerabilities Approved/Declined · Endpoints Missing/Installed/Ignored · Deployments Success/Failed/In Progress/Others, same donut treatment as the Software "Installation snapshot") + two half-width (`col-span-3`) **list-preview cards** (Affected Products, Files) showing the first 2 records inline (gray rows like the Hardware Overview "Users" card) with a **"+N more ›"** link. Cards are plain divs — ONLY the "View more"/"+N more" link navigates (tabs for the gauges, right-rail groups for the previews). Files preview rows carry working **Copy link / Download** icon buttons (toast feedback; the File Details panel's were wired too). The AI Summary was REMOVED from this Overview.
+- **Patch Endpoint tab (`PatchComputersTab`)**: controlled by the drawer (`computers`/`setComputers` — 74 endpoints incl. 52 generated); searchable **Remote office** group dropdown (15 groups; bucket counts refilter), Missing/Installed/Ignored pills, checkbox bulk-select → neutral **Take Action** dropdown (Missing = Install Patch / Delete only), sticky-bottom pagination. Install Patch moves rows into the **Deployment tab** (`PatchInstallationTab`): card view default + list toggle, `rounded-sm` status pills w/ "Installation Status" tooltip, CMDB-dependency-map-style status filter (All + pills + chips + Clear all/Done).
+- **Patch Vulnerabilities tab (`PatchVulnerabilitiesTab`)**: Approved/Declined pills, CVE grid (blue ID pills) w/ pagination, bulk action = **Decline only**; the **Impacted Endpoints** count pill (pointer cursor) opens **`PatchVulnEndpointsPanel`** — a side popup with the 7 most useful endpoint columns + search + `Building2` group filter (endpoints picked deterministically per CVE via `endpointsForCve`).
+- **Patch Superseded tab = React Flow supersedence map (`PatchSupersededTab`)**: CMDB-canvas parity, bidirectional — center patch card (blue accent) with **Superseded By branching UP (green `#22C55E`)** and **Superseded branching DOWN (gray `#94A3B8`)**; node color = DIRECTION, severity only in the hover card. Rectangle card nodes (KB + `shortTitle()` — the "for Windows 11…" boilerplate stripped — + build), rounded-elbow edges (`getSmoothStepPath`), bus-label pills whose **WHOLE pill is the tooltip trigger** (the wrapper stays `pointer-events-none`; the pill re-enables events + `cursor-help`, so panning around it still works). **Recursive mock chain** (`childPatches`/`buildTrees`, deterministic hash, MAX_DEPTH 3) with CMDB-style count badges; **node click EXPANDS + zoom-focuses, never collapses** — collapse is minus-badge-only; tidy-tree layout (leaves take slots, parents center over visible children). Toolbar OUTSIDE the canvas: node search (highlight/dim, `Ctrl+F`/Esc) + **Expand-all/Collapse-all** (signal-key pattern) + **Fullscreen** (`fixed inset-0 z-[10000]` overlay + a `fitSignal` refit — RF doesn't refit on resize). Canvas controls: keyboard-popup/fit/zoom top-right, d-pad bottom-left; shortcuts in SHORTCUTS.md §3 (arrows/+−/F/R canvas-focused; Ctrl+F, Ctrl+Shift+F, E tab-wide). CMDB-style **measured hover card** (550ms, screen-space; a `useLayoutEffect` re-measures the real card height pre-paint and corrects top/flip — the fixed-height estimate broke on long wrapped titles). ⚠️ Two React Flow gotchas: (1) non-draggable+non-selectable nodes get `pointer-events:none` unless a canvas-level `onNodeClick` is registered — card-level onClick alone never fires; (2) the PatchDrawer content wrapper swaps to `flex-1 min-h-0 overflow-hidden flex flex-col` while `activeMainTab === 'superseded'` so the map fills exactly (no scrollbar, bottom d-pad not clipped) — every other tab keeps `overflow-y-auto`.
+- **Patch Deployment detail page (`PatchDeploymentDrawer`, separate-file clone of `PatchDrawer`)**: tabs = **Overview · Endpoint · Patches · Deployment · Audit Trail** (no Vulnerabilities/Superseded; `patches-list` is a new tab rendering `PatchDeploymentPatchesTab`). Endpoint tab passes `hideBuckets` to `PatchComputersTab` (no Missing/Installed/Ignored pills; office filter sits RIGHT of search, popup right-aligned). Header: **Refresh icon** instead of Approve/Decline; pro KPI strip = Status (colored) · Install Progress (`installed/inScope` + pct, Ignored excluded from denominator) · Patches · Install After · Expiry (red when past) — data-driven via the adapter's `deployment` payload. 3-dot = `patchDeploy` variant (**Update Configuration · Cancel Deployment**). Right panel: `patchDeployMode` → titles "Patch Deployment Properties"/"Patch Deployment Fields", `PATCH_DEPLOYMENT_FIELDS` (run properties incl. Remote Offices/Notify to/Retry rows); rail has NO Affected Products/File Details; Overview has no products/files preview cards.
+- **Endpoint detail page (`EndpointDrawer`, separate-file clone of `PatchDrawer`, opened from the Endpoints listing)**: tabs = **Overview · Vulnerabilities · Patches · Deployment · Audit Trail** (Superseded removed; tab id `computers` relabeled "Patches"). Header: agent-health dot (`size-2.5`, green/amber from `endpoint.agentOnline`) BEFORE the EP id pill; **Refresh icon + blue "Scan Now" primary** replace Approve/Decline; KPI strip = **System Health · Missing Patches (LIVE count from `endpointPatches` state, red/green) · Reboot Required · Last Scan**. **Patches tab (`EndpointPatchesTab`)**: the inverse of the patch page's Endpoint tab — this endpoint's patches in Missing/Installed/Ignored buckets (searchable category dropdown + pills + Take Action per bucket [Install → moves to Installed] + sticky pagination; columns Patch ID→UUID, NO Actions column; 24 realistic patches, state lifted to the drawer). **Deployment tab (`EndpointDeploymentTab`)**: sub-tab pills **Patch · Package · Registry** with counts; **card view default** + list toggle (PatchInstallationTab-style tinted status pills incl. Received/Cancelled; registry cards use `items-center` since they have no ID-pill line); Package = AnyDesk/Zoho/Spotify rows w/ Created/Updated dates; Registry = 3 hardening entries. **Overview**: three gauges (Vulnerabilities · **Patches (LIVE from `endpointPatches`)** · Deployments — the latter still old clone data), **full-width 1-up in the small view** (`grid-cols-1` narrow), then a **"System Overview" card** (Software-Details pattern from the software drawer: bordered white card, label-over-value grid 4-up wide / 2-up narrow) listing 12 hardware/OS fields (Host Name / Operating System / OS Version / OS Architecture / Manufacturer / Model / Serial / CPU / RAM / Disk / IP / Domain·Workgroup, static realistic values, no "View more"); no Affected Products/Files cards. **Right panel**: `endpointMode` (threaded panel→accordion→`AssetFields`) → titles "Endpoint Properties"/"Endpoint Fields"; field order = summary (System Health dot → OS Version) → **Tags** → identity (Asset ID/CI ID as blue links, Agent ID, MAC, …) → **SCAN INFO** subsection (dates with In Progress/Completed tint pills stacked UNDER the date); rail = Properties + **Notes** (hardware-style; Affected Products/File Details excluded via `!endpointMode` gates). ⚠️ Deployment gauge + Vulnerabilities tab + Audit Trail still run on patch-clone data — pending user re-spec.
+- **Deployment tab views (`PatchInstallationTab`, shared by Patch/PatchDeployment/Vulnerability/DetectedCve drawers):** Card · List everywhere; the **Topology view AND the Full screen button are PATCH-DEPLOYMENT-page-only** (opt-in `showTopology` prop — only `PatchDeploymentDrawer` passes it). Full screen = whole tab → `fixed inset-0 z-[10000]` overlay (Superseded pattern). In topology mode the toolbar swaps to the compact Superseded-style node search (`w-[280px]`, Ctrl+F focuses / Esc clears — wired) + the SAME status Filter pill (list-view option set; on canvas "Yet to Receive" maps to Pending/Waiting) placed right after the search; search+filter SPOTLIGHT the canvas (non-matching nodes/edges fade, `dim` in node data); switching views clears both. **"View Configuration" on every deployment row/card opens `EndpointConfigFlow`** — see its bullet below.
+- **Individual endpoint chain flow (`EndpointConfigFlow.tsx`)** — center popup (1240px, 560px canvas) from a Deployment row's View Configuration: one linear React Flow chain **ServiceOps → Main File Server → DS-N → Remote Office → the endpoint** (DS/office picked deterministically from the host name) with Internet ↔ Main FS above (two-way green). Upstream hops are green; the FINAL hop takes the endpoint's real installation status (Failed = red line + red-ring endpoint card — endpoint-side reason like "offline/shut down", NEVER a download failure: the endpoint doesn't download from the Internet in this chain, so its hover card has NO Download Status row, just a red reason strip). Node hover = anchored card (endpoint gets IP/config/date/retry/task rows; Internet none) + connected lines animate dashed; canvas controls = same [fit]·[+/−]·[reset] cards + d-pad positions as the whole topology; status legend bottom-right.
+- **Deployment Topology View (`DeploymentTopologyView.tsx`)** — horizontal left→right React Flow canvas (Superseded recipe transposed) showing patch flow Internet → Main File Server → Distributed Servers → **Endpoint GROUPS** (individual endpoints are NEVER nodes — Local Office is the default group; each group card = name, "N/M installed", Failed/In-Progress chips [or All Success green / N Pending gray when nothing to flag] on ONE row with the count, and a 4-color stacked status bar; no overall status on group cards). **Scenario picker** (5 architectures: Main FS Only / +Agent Internet / +Distributed Servers / Mixed DS Internet / Full Internet) with a description line; `DEPLOY_SCENARIOS` data incl. per-group `endpointStats`. **Cards render at FIXED heights (`KIND_H`, content vertically centered)** and the layout positions rows by CENTER, so connectors attach at each node's exact middle and same-row links render as literal `straight` edges (no S-jog); fan-outs keep smoothstep elbows. **Edge colors = 4 statuses only** (green Success / red Failed / orange In Progress / gray queued — legend bottom-right): into a GROUP the color reflects the DELIVERY (any endpoint success ⇒ green; red ONLY when all failed — endpoint-local failures must not redden the line); Waiting/Pending SERVERS inherit downstream evidence via `subtreeFlow` (offices already succeeding ⇒ the upstream link shows green); **ServiceOps→Main FS is ALWAYS green**; NO fallback edges (removed as clutter — the cache rule lives as the "Always stores every patch" line on the Main FS card). **Internet edges**: double arrowheads (two-way collaboration) and — except the Main-FS drop — a custom **`LaneEdge`** that routes top-lane → inter-column gap → target's LEFT handle so lines never pass behind cards (`data.lane` staggers parallel runs). **Hover**: rich node card (550ms, node-anchored above/flips-below w/ arrow + real-height correction, hover-persistent), for groups incl. an **Endpoints by Status** grid + a full-width **"View all endpoints"** strip (CMDB active-issues pattern) opening `GroupEndpointsPanel` — a right side popup (status pills w/ counts, removable group chip inside the search, borderless grid; endpoints generated deterministically to EXACTLY match `endpointStats`); NO hover card on the Internet node; edge hover = dark "label + Patch Download/Distribution Flow" tip. **Controls**: top-right stacked cards ([⌨ keyboard + fit] · [+/−] · [reset]) + CMDB-style free-standing d-pad bottom-left; canvas keys arrows/+−/F/R (see SHORTCUTS.md §4); canvas height measured live (`window.innerHeight - top`) so it fills to the drawer bottom exactly, re-measured on fullscreen toggle + a fit nudge. **Later additions:** (1) **flow-direction toggle** in the scenario bar (`orient: 'horizontal' | 'vertical'` — the whole layout transposes: depth/cross axes swap, tree handles flip Right→Left ⇄ Bottom→Top, Internet moves to a left lane, `LaneEdge` has a vertical variant); (2) edges are **SOLID at rest** — the dashed-flow animation is a **NODE-hover effect** (hover a node → all its connected lines animate; `hoverNodeId` + `displayEdges` memo; edge hover shows only the flow tooltip) — CMDB-map pattern, same in `EndpointConfigFlow`; (3) **`deliveryFailed: true` on a DS/group** = the parent couldn't deliver → its incoming line is red AND the card gets a red border+ring (post-pass marks any node with a red incoming edge; demoed on S4's DS-2 with an error in its hover card); (4) legend is **collapsible** (chevron + always-visible List toggle, CMDB pattern); (5) scenario 6 = **Enterprise Scale, 18 index-generated remote offices** (single Internet link, collapse/search to focus); (6) the **flow-direction toggle moved OFF the scenario bar ONTO the canvas controls** — merged into the reset card as a SINGLE toggle button (below Reset) that shows the orientation you'd **switch TO** (↕ while horizontal, ↔ while vertical) and flips the layout on click (`CanvasControls` takes `orient`/`onOrientChange`); the scenario bar now holds only the picker + description (safe to delete when the live product drops it); (7) the **collapse/expand badge is orientation-aware** — right-center in horizontal, **bottom-center in vertical** (`orient` rides in each node's data).
+- **Detected CVE detail page (`DetectedCveDrawer`)**: tabs = **Overview · Endpoint · Patches · Audit Trail** (Deployment tab removed). **Overview** = Description card (NVD-style paragraph COMPOSED from the record's real facts via the adapter) → **Patches + Endpoints donut row** (local `DonutKpiCard` copy; Patches by severity → `patches-list`, Endpoints by bucket → `computers`; 2-up wide / full-width narrow) → **References** card (MSRC link built from the CVE id, Source, tag chips) → **CVSS 3.1 Metrics** card (Base Score color-graded; Exploitability/Impact sub-scores + Access Vector derived deterministically from the score; severity tinted pill) — the cloned KPI donuts were removed. **Header KPIs** = Severity · CVSS 3.1 · Exploit (red "Exploited" when in-the-wild) · Patch Available · Impacted Endpoints · Published — all from the **`Patch.cve` adapter payload**. **Header actions** = Copy Link · Refresh · **Approve/Decline** (stateful patch-page pattern; Edit + 3-dot removed). **Right panel** via **`cveMode`** (threaded panel→accordion→`AssetFields`): titles "CVE Properties"/"CVE Fields"; fields = CWE ID · Status · Severity · Approval Status · Exploit Status · Patch Availability → **Tags** → Published/Last Updated dates; panel search field + the pin/search/filter hints card are REMOVED (`cveMode` gates); Affected Products/File Details rail icons excluded.
+- **Patch Deployment Overview is TWO layouts, branched on `isOsUpgradeRun`** (`activePatchRecord?.deployment?.deploymentType === 'OS Upgrade'`): a **Patch** run keeps the original — severity/bucket **donuts** + the four stat cards in one 4-up row over BOTH drill-downs (Patch Status by Category · Status by Remote Office). An **OS Upgrade** run gets the Package-Deployment layout below. The four stat cards are one shared `statCard(s, stretch)` helper; `stretch` is what makes the OS-Upgrade 2×2 block `h-full`-fill its cell so it squares up against the drill-down beside it (the grid's default `items-stretch` does the rest — an earlier `self-start` was what left them floating short).
+- **Patch Deployment Overview — OS Upgrade layout (from the Package-Deployment reference):** row 1 = ONE full-width **`CountListCard`** (Endpoints) — a tinted count block (`bg-[#F7F9FC]`, 28px number + caption) beside the first THREE records as `bg-[#F9FAFB]` rows with a status dot (endpoint bucket), the IP right-aligned, and a `+N more ›` link; the donuts are gone. ⚠️ **There is NO Patches card on an upgrade run** — the payload is an OS image, so a card counting patches states the wrong thing about what is being pushed. It was removed rather than relabelled, and with nothing beside it the Endpoints card takes the full width instead of sitting in half a two-up row (the grid is a plain `grid-cols-1`, not the `wide ? 2 : 1` the patch branch uses). Row 2 = one **Deployment card** holding the 4 overall stat cards as a **2×2** grid beside a single **`StatusBreakdownCard`** ("Status by Remote Office" → bar + tinted rows + Total Installations). The second breakdown ("Patch Status by Category") was dropped to match the reference — `PATCH_STATUS_BY_CATEGORY` is still exported if it's wanted back. ⚠️ **An OS Upgrade run still shows PATCH data elsewhere** — the header KPI ("Patches N"), the Patches tab and the patch×endpoint deployment matrix all read `DEPLOYED_PATCHES`. Only the Overview card was removed; swapping the payload wholesale (so an upgrade run carries its OS image everywhere) is still the outstanding piece.
+- **Patch Deployment Overview — SUPERSEDED description (`DonutKpiCard` + `StatusBreakdownCard` module-level components in `PatchDeploymentDrawer`)**: TOP row = **Patches** + **Endpoints** donut cards only (2-up wide / **full-width 1-up small view**; the gauge is sized up — `dia = wide ? 148 : 116` — and its legend uses a `min-w-[84px]` label so values sit right after the label yet stay column-aligned; Patches donut = `DEPLOYED_PATCHES` by severity, Endpoints = `patchComputers` by bucket). Below them, ONE **bordered "Deployment" group** (`rounded-xl border`, NO bg fill; header = violet Download badge + "Deployment" + a single "View more" → Deployment tab) holding: (a) **4 overall-status stat cards** — Success / Failed / In Progress / Other (`depSuccess`… counts, value colored by status, grey at 0; 4-up wide / 2-up narrow); (b) **two dropdown breakdown cards** `StatusBreakdownCard` — **Patch Status by Category** + **Status by Remote Office** (`PATCH_STATUS_BY_CATEGORY` / `STATUS_BY_REMOTE_OFFICE` standalone mock, per-status split + proportional 4-color bar + tinted status rows + Total). Each dropdown defaults to an **"All …"** option (aggregates every entry) then drills into one category / office. (The old 3-donut / scattered-2-card layout is gone; `DonutKpiCard.onClick` is optional so the deployment-status donut variant elsewhere can omit its link.)
+- **Deployment tab = patch × endpoint MATRIX (Patch Deployment page only)**: `PatchDeploymentDrawer` seeds `patchInstallations` via **`buildDeploymentMatrix()`** (in `PatchDeploymentPatchesTab`) = one row per (patch, endpoint) pair (4 `DEPLOYED_PATCHES` × 4 `DEPLOYMENT_ENDPOINTS` = 16); `handleInstallPatch` fans out one row per patch too. `PatchInstallation` gained optional `patchId`/`patchName`/`patchSeverity`/`result`. In `PatchInstallationTab`, when rows carry a `patchId` (detected via `patchOptions`) the **list view swaps to matrix columns** (Endpoint ID · Host Name · **Patch ID · Name · Severity** · Deployment Date · Installation Status · Retry · Download · **Result** · Actions) and each **card gets a patch strip**; the **Filter popup becomes TABBED — Status | Patch** (CMDB dependency-map Filter-pill pattern: per-tab "All", blue active-dot on the hidden tab, selected chips above the tabs). The Patch filter also feeds the **Topology view** (`patchFilter` prop → `officeHasPatch()` spotlights the offices that received the patch; infra nodes stay lit since the Main FS stores every patch). The Endpoint tab on this page shows only the 4 targeted endpoints. The plain Patch page's rows carry no `patchId`, so it keeps the original columns + flat status filter.
+- **BOM tab on the Endpoint detail page (`EndpointBomTab`)**: added to `EndpointDrawer` as tab id **`bom`** between Vulnerabilities and Patches (four anchors had to change: `allTabs`, `tabWidths`, `tabLabels`, AND the `tabConfig`/`allowedTabIds` array inside the tab-strip IIFE — the last one is easy to miss and silently hides the tab). Layout is a **single control bar** — **BOM-type select** (SBOM/CBOM/AI BOM, no counts) · **Scanned Paths select** (every scan scope, findings badge per row) · **ⓘ** scope hint · **⚙ settings** (opens Manage scan paths) · right-aligned primary **Scan BOM** — then a **"Versions" heading** (count + ⓘ explainer) whose right side holds a **search icon that expands into the date filter** and **Compare versions**, then the version rail. Every scope carries **3 versions with v3 as Current**. A version card's top line is v-number · timestamp · **Current/Superseded pill · format pill** (the two sit together — both describe what the version IS), with download / re-scan / "View components · N" on the right; the second line is the **change dots — green added · red removed · amber updated** (grey dot + grey number at 0; v1 counts the whole inventory as added). Between cards a connector accounts for the scans that ran and found nothing ("2 scans between v1 and v2 · 1 found no change"), clickable → the scan-runs panel. ⚠️ The landing-tab effect reads **`activePatchRecord.bomMode`**, NOT `activeAsset` — `patchToAssetShape()` drops unknown fields.
+- **BOM sub-screens** (all reached from the BOM tab): `BomComponentsPanel` (**right SIDE DRAWER**, `w-[1240px]`, opened by "View components/crypto assets/models · N" — it does NOT take over the tab; columns differ per BOM type: SBOM = Component/Version/Type/Ecosystem/PURL/License/Origin-pill, CBOM = Asset/Primitive/Algorithm/Key Length/Protocol/Location/Expiry/Compliance-pill, AI BOM = Model/Provider/Version/Task/Parameters/Source/License/Used For — and ALL three end with an **Excluded Paths** column showing one glob chip inline + a `+N` chip whose Radix tooltip lists the rest, from `excludedPathsFor()`; ⚠️ the four filter selects are labelled per type via `labelsFor(type)` and an effect resets them on type/scope change — a filter still holding the previous type's label filters every row out). `BomCompareVersionsPanel` (**side drawer** titled "Compare BOMs": Scanned-Paths select seeded from the tab → "Compare versions" with **two version boxes** (v-number + dropdown, date, component count) joined by "with" → tabs **All / Added / Updated / Removed / Unchanged** with counts that sum to All → on the **All tab only**, a **CRITICAL VULNERABILITY** section listing every CVE with an Added/Updated/Removed tag → the diff rows. Diff is always computed oldest→newest whichever box holds which, so the labels stay truthful). `BomScanPathsPanel` (per-product path table with edit/delete — the OS scope cannot be deleted — "+ Add product", and a host-wide exclude-path glob chip editor). `BomScanRunsPanel` (timestamp/trigger/duration/result/outcome for one timeline gap). Download format popover (CycloneDX 1.6 vs SPDX 2.3) lives inline in `EndpointBomTab`.
+- **BOM data (`bomData.ts`)** is deterministic from the endpoint id, and every number is derived from ONE source so no two screens can disagree: `componentCount()` sizes a scope, `bomComponents()` cycles the 40-entry catalog (bumping version + PURL on each pass) to reach exactly that count, `bomVersions()` takes its change dots from the SAME `bomDiff()` the Compare modal renders, a version's `generatedAt` IS its newest scan run's timestamp, ⚠️ **`bomDiff` must shift with `>>>` not `>>`** — `hash()` returns a full uint32, and the signed shift turns anything above 2³¹ negative, which made `nUpdated` 0 and `nRemoved` −1; `Array.from({length: -1})` is silently empty, so updated/removed rows vanished everywhere with no error — and a host's `lastGenerated` is the newest current version across its scopes. `SCAN_DATES` runs newest→oldest, so a HIGHER version number takes a LOWER index. Catalogs: `SBOM_CATALOG` (40 realistic components, several carrying real CVEs), `CBOM_CATALOG` (12 crypto assets w/ Compliant/Deprecated/Quantum-vulnerable posture), `AIBOM_CATALOG` (8 models), `APP_PRODUCTS` (5 application scopes) + the implicit `OS_PRODUCT_KEY` scope every host has.
+- **BOM retention + CI addressing (later pass):** `bomRetention(endpointId, productKey, type)` reads `RETENTION_DEFAULT` from **`bomAdminData.ts`**, so Admin › BOM Management › Retention is the single source for both screens. Each `BomVersion` carries **`expiresInDays`** (`null` on Current — a living SBOM never ages out; ages measured against `NEWEST_SCAN`, not the real clock, so the demo can't drift), rendered as an `Expiry: N days` chip that turns amber ≤14 days. Below the OLDEST card the rail closes with "N older versions deleted by retention" (deleted versions sat before v1 in time, so the note ends the rail rather than opening it). **`bomCiId(id)`** maps `EP-###` → `CI-###` for **BOM screens only** — the BOM listing, the sub-panel subtitles, the drawer header (gated on `activePatchRecord?.bomMode`) and the drawer TAB (`DrawerStack` sets `displayId` when `data.bomMode`; selection/closing still key off the real id). Patch/Vulnerability keep `EP-###` for the same machines. `BomComponentsPanel` gained **tabs** (All / **CVEs** / Added / Updated / Removed / Unchanged with counts) and an `initialTab` prop — the **Change COLUMN was removed** (the tab already says which change you're looking at, and `Change` is excluded from the filter-builder field list so there aren't two controls for one thing). The **CVEs tab** filters to `cveCount > 0`, is hidden entirely for CBOM/AI BOM (no vulnerability data), carries a red shield + red badge so it doesn't read as a change kind, and is what a version card's CVE metric opens. ⚠️ Its badge counts **components**, while the version card's CVE metric counts **CVEs that arrived with that version** — three different measures, so both tooltips state their unit explicitly rather than leaving the numbers looking contradictory — clicking a version card's added/updated/removed count opens the panel already on that tab. ⚠️ The change tag is keyed **`name@version`, not name**: the catalog cycles the same component at several builds, so name-only keying tagged every build and the tab counts contradicted the version card. Updated entries tag BOTH `version` and `fromVersion` (the grid renders the CURRENT inventory, so the row may still carry the old build). Export moved beside the search bar (it acts on the tab + search + selection, which all live there). `BomDiffView` has a **kind select** (All/Inserted/Modified/Removed) that FILTERS the document rather than only tinting it, so changes come to the top; the legend swatches are clickable filters too. Compare BOMs' CVE rows are collapsed by default like every other tab. The Ingest drawer dropped its CI Type field and per-field helper paragraphs, and **Add new CI opens its own stacked drawer** (`z-[10000]`) instead of an inline form. The endpoint right panel gained a **Cosigned** row (success/failed) directly under **CMDB link**.
+- **Global Search (`GlobalSearch.tsx` + `globalSearchData.ts`)** — "One input. Find anything. Go anywhere." Deliberately NOT Ask AI: search answers "I know it exists, take me to it" and hands the query to Ask AI when it can't. **Entry** = a 260px `GlobalSearchButton` pill in `Header` immediately before the Calendar icon (`Search ServiceOps` + a `Ctrl K` key cap); it renders `null` for the `none` role, so a user with nothing to search never sees a box that can only fail. **Opens** on click, `/` (ignored while a field has focus) or `Ctrl/⌘+K` — all clear of the Alt-based `DrawerShortcuts` chords. Mounted ONCE by `App` **inside** `DrawerStackProvider`, so it works on every page and opens any module's real detail drawer as a tab; the header talks to it by an **`open-global-search` CustomEvent** rather than a prop, because 19 list pages render their own `Header`. **Index** (`searchIndex()`, built lazily on first search so it sits outside the list-page ↔ drawer-host import cycle) maps the SAME mock pools the list pages render — no second copy of the data — plus `ADMIN_SECTIONS`' 164 setting cards, the sidebar destinations, and four pools this prototype has no module for (Knowledge/Projects/Users/Reports). **14 stable groups** in a fixed order (the spec's 12 with Patches + Vulnerabilities inserted after Configuration Items, since this product has those modules); Endpoints live under Configuration Items and Licenses/Contracts/Purchases under Assets, each keeping its own row-level type label. **Query language** (`parseQuery`): `type:` `status:` `assignee:me` `@person` `#tag` `include:archived`, combinable, rendered back as removable chips, with Tab-completion suggestions. **Ranking**: every term must match somewhere (AND, not OR); an exact identifier promotes a "Go to INC-1042" dominant row, otherwise a result is promoted only when it is ≥2× the runner-up — a top result that is barely ahead teaches users not to trust Enter. 4 per group + "See all N in X →" which navigates and carries the query. ⚠️ **Race guard**: `requestRef` is bumped per keystroke and stale responses are dropped — a slow "VPN" response must never overwrite newer "Printer" results. ⚠️ `StatusDot`-style helpers aside, `visibleTo()` is the ONE permission gate — private reports and the requester universe are filtered there, before ranking, so no count/title/existence can leak. History is **keyed by role** (`globalSearch:*:<role>`) because it belongs to a user, not a browser. **Demo switcher** (flask icon, footer): forces the 6 states a mock build can't reach on its own — first-time, slow/progressive, Assets-group failure, total failure, permission-safe empty — plus the technician/requester/no-access role. The §33 preview panel is deliberately NOT in V1.
+- **Global Search tiered filtering (`globalSearchFilters.ts` + `GlobalSearchFilterUI.tsx`)** — "Show the most useful filters first. Keep the rest available, but out of the way." **Tier 1** = each module's default list columns (5-7) as chips on the group header; **Tier 2** = the full set behind **+ Filter**, sectioned Common / Module-Specific / Custom Fields with search + arrow/Enter keyboard nav; **Tier 3** (automation predicates — time-elapsed, workflow-only, routing conditions) is deliberately absent. ⚠️ **Filters are GROUP-scoped, never global** — same-label fields mean different things per module (a request is "Open", an asset "In Use", a deployment "Ready to Deploy"), so there is no global filter row and every bar is labelled "<Group> filters". `FILTER_SETS` holds one entry per group; **Admin Settings and Destinations have none** (name-matched navigation). Every field reads the ORIGINAL record through an `get(hit)` accessor, so nothing is denormalised into the index and the two can't drift. **AND across filters, OR within one filter's values** — matching the module lists. Value control follows field kind: multi-select w/ dots, searchable person picker (Me pinned first), date presets + custom range, text contains. Options come from `optionsFor()` = declared list or the values the matched records actually carry, so a picker never offers a dead option. **Filtering runs over each group's `all` (untruncated) set and re-truncates**, so a filter can surface a record that was below the 4-row fold — this is why `GroupResult` carries `all`. ⚠️ A group emptied by its own filters is **KEPT, not dropped** (header + chips + inline "None of the N … match these filters" + Clear) — dropping it would take the chips that caused it off screen. **See All carries query + that group's filters** (`handoffSummary`). `parseAnyDate` handles all five date shapes in these mocks incl. DD/MM/YYYY (which `Date.parse` reads as MM/DD and silently gets wrong). Custom-field values are **derived deterministically from the record id** (`derived()`), since this prototype has field definitions but no per-record values — a picker backed by nothing would filter everything out. `trackFilter`/`filterAnalytics` instrument the events the brief lists; the roll-up is readable from the Demo panel. Group Tier 1 rows **expand on click, not hover** (hover would shift the results under the cursor) and auto-expand whenever the group has active filters.
+- **BOM Management (Admin) — `AdminBomModule.tsx` + `AdminBomTargeting.tsx` + `bomAdminData.ts`:** the settings surface that gates everything Component Intelligence can show. Reached from **IT Operations → BOM Management** in the Admin sidebar (also an `ADMIN_SECTIONS` entry, so its 3 Overview cards deep-link straight into a screen). Four screens driven by one `BomAdminScreen` state (`'landing' | 'licensing' | 'scheduler' | 'retention'`) lifted into `AdminPage` — `PageHead` (breadcrumb → title → subtitle) is identical on all four. **Licensing** = the gate: 3 KPI cards (Seat pressure w/ amber usage bar, Enrolled CIs, Source mix) + `Manual Enrolment` / `Auto-enrol` tabs, the auto tab adding a stat strip + View Rules / New Rule; every count derives from the live `cis` array via the helpers in `bomAdminData` (`seatsAvailable`/`agentScanned`/`byRule`/…) so no two cards can disagree. **Scheduler** = 4-cell `StatStrip` + a master "Automatic BOM Generation" toggle card + the Schedule Policies table (Run Now / Edit / ⋯). **Retention** = 3-cell strip + the DEFAULT POLICY card ("Keep the latest N versions or automatically delete versions older than N days" — two independent `Select`s) + the Retention Exceptions table. **Shared targeting (`AdminBomTargeting.tsx`)** is the pattern every drawer reuses: the two-card `TargetingCards` block ("Add CIs by hand `FIXED`" → `ChooseCisDrawer`, "Auto-include by condition `DYNAMIC`" → `ConditionsDrawer`), a `Targeting` value (`{ciIds, groups, conditionsOn}`), `matchedByConditions()` (rows AND within a group, groups OR'd), `targetedCis()` (deduped union of both mechanisms) and `targetingSummary()` (the plain-English "CI Type is Windows Server" line, so a rule created in the UI reads like a seeded one). ⚠️ A condition only counts once `field`+`op`+`value` are all set — a half-written rule must match NOTHING, or a draft would silently target the whole estate. ⚠️ `StatusDot`'s on-test is **anchored** (`/^(active|enabled)$/i`) — an unanchored `/active/` also matches "Inactive" and paints it green.
+- **Patch Deployment — deployment type, saved views, and the create form:** `PatchDeployment` carries **`deploymentType: 'Patch' | 'OS Upgrade'`** (stated only on the exceptions in `DEPLOYMENTS_SEED`; the `'Patch'` default is applied once in the `.map()` that builds `mockPatchDeployments`) plus an **`archived`** flag. **Saved views** live in `DEPLOYMENT_VIEWS` (Pending · Draft · Canceled · Expired · **OS Upgrade** · All · Archived), each a `{label, chip, match}` — the dropdown has a search, per-row **pin** (pinned float to the top) and an active-row highlight, and the active view renders a **star (set as default) + filter chip** row under the toolbar so what's being hidden is never invisible. ⚠️ Archived rows belong to exactly ONE view: that rule lives in **`inView()`**, not in each `match`, so a new view can't resurrect them. **`CreatePatchDeployment.tsx`** is the form behind the listing CTA (rendered in place of the toolbar+table, not a route). The field is labelled **"Deployment Category"** everywhere it is user-visible (create form — third in the Install After / Expiry Date row —, the record's Patch Deployment Fields card, and the OS Upgrade saved view's filter chip); the internal prop/type stays `deploymentType`, the same way the "Request" rename kept its internal identifiers. ⚠️ **Deployment Category reshapes the form**: `OS Upgrade` swaps the payload section from **Patches** to **OS Upgrade Patches**, whose picker lists only `OS_IMAGES` with `status === 'Uploaded'` — a run built on an ISO that never landed could not run. ⚠️ **The form has NO Configuration Type field** (Install/Uninstall): it was removed along with the effect that used to snap it back to Install for an upgrade run, so nothing on the create page sets one. `configType` elsewhere in the app is deployment-ROW data (`PatchInstallationTab`, `EndpointDeploymentTab`) and is unrelated — don't "restore" it here from those. One generic `PickerDrawer` serves all four "Add …" actions; its **`single`** prop (OS Upgrade Patches only) keeps ordinary checkboxes but **locks the rest of the list out** once one is chosen (`lockedOut()` → `opacity-45`, `disabled`, no click) — the chosen row stays live so unselecting it re-opens the whole list, and the footer says so ("One OS upgrade patch selected · unselect it to choose a different one") rather than leaving greyed rows unexplained. The link relabels to **Change OS Upgrade Patch** once one is on. ⚠️ The payload has ONE name everywhere the admin reads it — section head, field label, add/change link, picker footer, empty row and the publish toast all say "OS upgrade patch", never "OS image". ⚠️ The limit is enforced by the control, not by an error afterwards: no state holds two. Endpoints and Remote Offices stay multi-select.
+- ⚠️ **Admin listing layout — the standard from now on (Workflow is the reference screen):** an admin LISTING is the same surface as a technician-portal list page, so it renders on **`bg-white`** (not the hub's `#F7F9FC`). Every admin pane (Overview, BOM, OS Upgrade — including the OS Upgrade detail's header, tab and content bands) uses **`px-4`** horizontal padding; the hub started at `px-8`, went to `px-6`, and settled here. Layout: **page head** (20px semibold title → one-line subtitle ending in a `View Docs ↗` link, **no breadcrumb** — the nav says where you are) → **toolbar** (compact `w-[280px]` search with the magnifier on the LEFT and placeholder "Search", then any scope tabs, then the primary CTA on the right) → a **full-bleed table with NO card around it** (`thead` bottom hairline, `px-4 py-2.5` headers at `text-[12px] font-semibold text-[#364658] tracking-wider`, `tbody divide-y divide-[#e5e7eb] bg-white`, `hover:bg-[#f9fafb]` rows, `px-4 py-3` cells — identical to `TicketTable`) → shared `Pagination`. Tabs and the CTA are dropped when the module has none rather than faked. First applied to OS Upgrade; the BOM Management screens still use the older card-wrapped layout.
+- **OS Upgrade (Admin › Patch Management) — `AdminOsUpgradeModule.tsx` + `AdminOsUpgradeDetail.tsx` + `OsUpgradeUpload.tsx` + `osUpgradeData.ts`:** the ISO catalogue endpoints are upgraded from. Reached two ways, both routed through **`CARD_MODULES` in `AdminPage`** (keyed `"<section>/<card>"`) so they can't diverge: the **OS Upgrade card** in the Patch Management section, and the **level-2 nav row** — `Patch Management` was added to `SIDEBAR_TREE`, so the branch expands and OS Upgrade sits under it. It is a CARD with a module, not a section with one (`MODULE_TITLES` is for sections); the other five Patch Management cards have no screen, so `select()` clears `activeCard` for them rather than leaving a nav row lit over the Overview. **The listing IS the upload flow:** there is no page-level Add button; each `OSU-#` row's Action column is the only entry, and a row that has never been uploaded shows the **upload icon alone** (nothing to view yet). The **eye** opens an **Upload Status side panel** — **history ONLY** (860px; a current-state card above the table was removed as it restated the current row): the plain borderless listing grid of attempts, with a blue **Current** chip on the file actually in place and the state in the **Status** column. ⚠️ Current = the newest attempt with status `Uploaded`, NOT the newest row — a failed attempt on top of a good one doesn't replace the file. An in-flight transfer is **prepended as a live row** (`In Progress`/`Paused`, `N% uploaded` in Time), since a job only becomes an attempt once it ends and removing the card would otherwise hide a running upload. Per-attempt reasons are NOT printed under the file name; the Status pill carries them in a Radix tooltip (`cursor-help`), so every row stays one line. An **Action** column carries the ISO delete, rendered on the **current row only** (`a.id === currentId`) — the other rows are history with no file behind them left to remove. The **listing's Upload Status pill does the same** — a Failed/Cancelled row reads its reason off `history.find(a => a.status === status)?.detail`, so the listing and the panel tell one story instead of the row growing a second line. ⚠️ `UploadStatusPill` doesn't forward a ref, so the Radix trigger has to be a wrapping `<span>`, not the pill itself. ⚠️ The table is **`table-fixed` with a `colgroup`** (Size 90 · Uploaded By 140 · Time 185 · Status 110; File Name absorbs the rest and truncates) inside the panel padding — that makes horizontal scrolling impossible at any width, so Status can never be pushed out of view. `overflow-x-auto` + `min-w` did NOT achieve this: nowrap columns simply demanded more than 720px and the pill ran off the edge. the **upload icon** opens the Upload ISO popup and is disabled while that row is transferring. Columns: ID · Name · Language · Size · Upload Status · Upload Time · Platform · **File action** (eye + upload, or pause/stop mid-transfer). There is no record-level Action column — deleting is about the FILE, and lives in the history panel (below) on the current row only. ⚠️ **A row's Upload Status is DERIVED** — `rowStatus()` lets an in-flight job override the stored status, so the column, the popup and the dock cannot disagree, and stopping needs no "previous status" bookkeeping (the stored status was never touched). ⚠️ **There is NO minimised dock** — minimising (or closing) the popup simply CLOSES it, and **the row becomes the upload**: its Status cell shows the pill + % + bar + "N of M · ETA", and its actions column swaps the upload icon for **pause/resume + stop**. A corner dock was tried and removed: it reads as "the popup moved", not "the popup closed", and it put a second set of controls on screen for one transfer. Multiple rows can upload at once — each shows its own progress in place. **One overlay at a time** — the popup and the activity panel are mutually exclusive. One `setInterval` drives every job through a `tickRef`/`jobsRef` pair (rebuilding the timer per state change would stall slow uploads). Reopening a row whose job **finished** drops that job so the popup returns to the picker; a **failed** one is kept so Retry is offered (plus "Choose another file"). Demo hooks: `.iso`-only + 10 GB validation reject before any transfer, and a file named `*fail*`/`*corrupt*` fails at 62% — the only way to reach the Failed state from the UI. **Detail page** is built from the SHARED drawer header parts, not hand-rolled: a bordered header band (**back arrow** → `HeaderIdPill` + 18px title → **`HeaderKpiRow`**; NO breadcrumb — the three-level sidebar nav already says where you are). ⚠️ The arrow is its OWN flex column, not inside the `h1`: putting it in the heading indents the title away from the KPI strip below it with Platform · Architecture · Language · Size · Upload · EOS [red when past]), then a bordered tab band, then the content — the three bands each carry their own padding so the rules span the full width. ⚠️ **No back arrow**: it sat beside the title and pushed it out of line with the breadcrumb above and the KPI strip below, giving the header three left edges; the breadcrumb's "OS Upgrade" link is the way back. Tabs **Summary · Computers**. Summary is THREE stacked FULL-WIDTH `section`s, each a **section head (blue `size-4` icon + 14px title) over a grey `rounded-lg bg-[#F9FAFB] p-5` panel** — the asset **Hardware tab's** metadata container: **ISO File** (first — until one lands the image can't be deployed, and on a fresh record it's the only action) → **OS Image Details** (label-over-value, 4-up wide; ends **Upload Time · Release Date · End-of-Support Date**, the two lifecycle dates adjacent — shipped on, supported until). ⚠️ **The grid carries NO ISO file name and NO reference URL**: the file name is the ISO File card's own subject one section above, and a link off the page says nothing about the image. `releaseDate` is a field on `OsImage` with a real ship date per record; `referenceUrl`/`referenceLabel` are still ON the type but nothing renders them → **Prerequisites**, which uses the SAME metadata grid with each rule read as a SENTENCE via **`prereqPhrase(p)`** in `osUpgradeData` — `{lead, value, qualifier, note}` rendered as muted-lead · **bold value** · muted-qualifier ("RAM — **4 GB** or more", "Secure Boot — Turned **on**", "Current OS — One of **Windows 10 2004** or later"). ⚠️ The phrasing is DERIVED from `p.key`/operator, never written per profile, so a new OS profile reads correctly for free and the words can't drift from the operator; `p.value` itself is untouched because `evaluate()`/`failText()` still compare against it. `PREREQ_NOTES` adds a caveat under three rows only (disk/tpm/currentOs) — a note on every row is noise with the comparison stated once underneath — "An endpoint must meet or exceed every value above…" — beside the eligible count and View computers. An earlier side-by-side version rendered prerequisites as condition-builder rows; both were dropped for the single metadata language. **`IsoFileCard`** covers every upload state in one card, and its picker is **INLINE — no dialog on this page**: "click Upload → read a dialog → click Upload again" was two steps for one intent. **Empty** = a **horizontal** drag-and-drop zone (`min-h-[112px]`, dashed, icon + `browse` link on one row, blue-tint on drag) beside the **Upload Guidelines** panel that used to live in the dialog — read before choosing, not after. ⚠️ The zone is deliberately compact: the three Summary sections are sized to clear the fold together, and the metadata/prerequisite grids keep the Hardware tab's roomy `p-5` + `gap-y-5`, so any height saving has to come from the upload chrome rather than the fields. The history affordance is a **primary-coloured "View upload history ›" link**, not an eye icon (history isn't something an eye glyph says); **file chosen** swaps the dropzone for a file chip + `Upload ISO`/`Choose another file` at the SAME min-height so the card doesn't jump; then **in progress** bar with pause/stop · **uploaded** file + a red **delete icon** · **failed** reason + Retry (which sets a local `replacing` flag revealing the picker over the outcome rather than opening anything). ⚠️ There is **no "Replace ISO" CTA**: deleting returns the card to its dropzone, which is already how a new file goes on, so replace was a second door to one room. `deleteIso()` clears `status`/`uploadTime`/`fileName` but leaves `size` — that is the catalogue's expected image size, not the file's — and the history panel's **Current** chip is gated on `image.fileName`, so once the file is deleted no attempt is marked current however it ended. Validation (`validateIso`) runs inline, in the guidelines column. ⚠️ `UploadIsoModal` still exists and is still correct **for the LISTING**, where a row's upload icon has nowhere inline to put a picker, with an **eye** to the history panel that appears only once there IS history. It drives the shared upload machinery through callbacks from the module, so the card, the listing row, the header KPI and the history panel all move together. ⚠️ **A bare `<button>` does NOT inherit its parent's font-size in this app** (preflight leaves it at the 16px default), so every text button needs an explicit `text-[Npx]` — "View Docs" and "View computers" both rendered 16px inside 12–13px rows until they were given one. Worth checking with `getComputedStyle` when a link-style button looks too big. Computers = the patch page's bucket pills **Compatible · Incompatible** with counts, search, shared `Pagination`, over the standard endpoint grid: **Endpoint ID · Host Name · IP Address · OS Name · Agent Version · Architecture · Compatibility Status · Reason**. The last two explain a row on its own terms — the pills filter, but only Reason says WHY a machine failed, and every Incompatible row fails for its own reason. ⚠️ **There is no Unknown bucket** — `CompatStatus` is `Compatible | Incompatible`. Hiding the pill alone would have orphaned its rows, so the STATE went with it: `evaluate()` lost its never-scanned early return, `unscanned()` is gone, `compatCounts` seeds two keys, and the fleet no longer generates unscanned machines (the `i % 20 === 19` slot fell through to a healthy row, and the two never-scanned `WIN11_SEEDS` became real endpoints — LEGACY-PC-01 failing on its own specs). Every row therefore carries an agent version, an architecture and a verdict that was actually computed. The `OsComputer` numeric fields stay nullable defensively, but nothing produces a null any more. ⚠️ **Compatibility is EVALUATED, never stored:** `computersFor()` generates a deterministic fleet from the image id and `evaluate()` judges it against that image's `PREREQUISITES`, so the two cards can't drift — and the grid's spec columns are **generated from the prerequisites** (`column: true`), so no row is ever flagged for a value the reader can't see. Prerequisite shortfalls in the generator are cut from each profile's OWN thresholds (a 55 GB disk blocks Windows 11 but not Ubuntu), otherwise the Linux images would have an empty Incompatible bucket.
+- **Support Portal (Admin › Support Channels) — `AdminSupportPortalModule.tsx` + `AdminSupportPortalSettings.tsx` + `SupportPortalBuilder.tsx` + `SupportPortalPreview.tsx` + `SupportPortalTemplateGallery.tsx` + `supportPortalData.ts`:** the surface an admin designs the requester's landing page on. Reached from the **Support Portal card in the Support Channels section** AND the level-2 nav row, both routed through **`CARD_MODULES`** in `AdminPage` so they can't diverge — the same card-owns-a-module pattern OS Upgrade uses. (It used to live under Organization; see the entry-point bullet below for why it moved and what the Organization card's removal means.) **The listing starts EMPTY** (illustrated state + the CTA centred inside it) and becomes the standard admin listing — head → search + All/Published/Drafts scope tabs → full-bleed table (`SPP-#` · Page Name + "Started from …" sub-line · Type · Status · Audience · Last Modified · Modified By · edit/duplicate/delete) — the moment a page exists. ⚠️ **A page is created the instant a New-page route is chosen, as a Draft**, not on save: that is what makes leaving the builder lossless and what lets the top bar's check mean "all changes saved". **Publish** is the only thing that flips a draft live; a **duplicate is always a Draft** (a copy is not live on the original's merit). The ⚠️ **Step 1’s form is a COMPONENT** — `PortalDetailsFields` + `detailsReady` + `EditPortalDetailsModal`, all exported from `CreateSupportPortalModal.tsx`. Create and Edit details ask exactly the same five questions, and two copies of five fields is two places for a label or a validation rule to drift. ⚠️ `DEFAULT_PORTAL_PAGE` is seeded with `company`/`url`/`idp`/`ssoOnly` so Edit details opens on a filled record — a default that cannot satisfy its own required fields reads as a broken row. ⚠️ `portalUrl` must be declared ABOVE `overlays` in `AdminSupportPortalModule`: `overlays` is JSX built during render and the details dialog reads a portal’s address as it is constructed, so a helper below it is a TDZ crash esbuild cannot see. **`New page ▾`** CTA opens two routes — *Customize from scratch* (blank layout) and *Use Template* (`SupportPortalTemplateGallery`: category chips + search, wireframe thumbnails drawn per `layout`, a right rail listing exactly the blocks that will land, double-click = use, and a "start from a blank page instead" footer link so the gallery is never a dead end). The menu is **centred under the centred empty-state CTA and right-aligned under the toolbar one**. **Builder** is `fixed inset-0` AND `AdminPage` drops the product header + admin sidebar (`builderOpen`) — a canvas competing with two navigations has nowhere to be; the back arrow is the way out. Top bar = back · **inline-editable title** (Enter commits, Escape abandons) · status chip · undo/redo **disabled with a truthful tooltip** (there is no edit model yet, so a live-looking button would lie) · save indicator · comments · share · **Preview** (full-screen, block hints off, "Exit preview" bar) · **Publish** · open-live-portal. Layout is canvas → **design panel** → **icon rail**: the panel is dragged from its LEFT edge and **clamped 400–600px** (`MIN_W`/`MAX_W`; window-level mousemove/mouseup, `userSelect` suppressed mid-drag), the rail is `w-[72px]` **sized to its longest caption ("Templates")**. Rail = **Add · Theme · Branding · Templates · AI** (AI uses the gradient `AiSparkle`); the DEFAULT panel is the design one (image-5 empty state, inline line-art illustration), each rail item swaps in its own purposeful empty state, clicking the lit icon returns to design, and the header's ✕ steps back to design then hides the panel (a chevron pinned to the rail restores it at the width it had). **`SupportPortalPreview`** is a real fluid layout, not a screenshot, so the canvas can outline and name each block on hover and so it survives the panel being dragged to 600px; a template's `accent` tints its hero. ⚠️ Two gotchas: the quick-action cards straddle the hero with a negative margin, and the hero is `position:relative`, so the cards need **`relative z-10`** or they paint *underneath* it (only visible with hints OFF, since the hint wrapper adds `relative` of its own); and the row ID pills need `whitespace-nowrap flex-shrink-0` or `KB-4` breaks across two lines once the panel is dragged wide.
+- **Support Portal builder — Add panel, canvas selection, and the element editor:** **`SupportPortalAddPanel`** swaps into the SAME 400–600px design panel (no second drawer): search → a **drag-scrollable group tab strip** (`.scrollbar-hide` from `theme.css`; window-level mousemove/mouseup, a >3px move suppresses the tab's click). ⚠️ The tabs use the **product's INLINE tab treatment** — the one every detail page uses (`px-2 py-3 border-b-2`, `gap-2.5`, active `#3D8BD0` underline, inactive `#6b7280` with `hover:bg-[#F5F7FA] hover:border-[#CBD5E1]`) at **13px rather than the detail page's 14**, because every other line in this panel is 11–13 and a 14px tab row would be the largest type on the surface it navigates. They were pills, which is a second tab language in a product that already has one — and pills read as filters, a set you pick from, where these are places you go. ⚠️ The strip keeps its bottom rule and has NO `pb`: a tab's own `border-b-2` has to touch that rule or the underline floats above the line it belongs to → grouped rows of icon-badge + name. Tabs are **scroll anchors with a scroll-spy** (the `IncidentDetailsTabV2` pattern). ⚠️ Two traps: each group MUST be its own block — with `contents` the wrappers leave layout, every sticky header inherits the scroller as its containing block, they all pin at top forever AND every header reports the same position, silently breaking scroll-to-group; and the LAST group can never reach the top, so `onScroll` treats "list bottomed out" as "last group is active" or the spy snaps back. Groups: **Components first** (the 11 ServiceOps portal blocks, using the product's own `SidebarIcons`), then Layout · Basic · Visual · Business · Custom. A component already on the page renders disabled with a green tick; `onPage` in `PORTAL_ELEMENTS` **must mirror what `SupportPortalPreview` actually renders**. — **Canvas selection (`PortalCanvas.tsx`)** is EXPLICIT, not DOM-walked: everything selectable wraps in `<Sel id="…">` and `PORTAL_NODES` (`portalPageModel.ts`) says what it is, so the panel knows which editor to show and the toolbar which actions apply. Click `stopPropagation`s → innermost wins; the blue chip's **❯ steps up to the parent** (without it a background behind a card is unreachable). Depth is **blocks + their key children**. The floating toolbar is **kind-aware**: a section gets `↓↑` (its axis), a card `←→`, and **text swaps the light bar for the dark rich-text one** whose B/I/U, theme-style, size, colour and align are all REAL (they write `NodeStyle`, `styleOf()` applies it). Bands at the very top pass `toolbarBelow` — there is no room above them. Every toolbar action is REAL — see the placement bullet below. — **`PortalElementPanel`** is ONE scroll: element header (breadcrumb ❯ + icon + name + "Content & data") → **CONTENT** (per-`ContentKind` editor) → **STYLE** (Layout/Style/Spacing drawers + Reset to theme style). ⚠️ **Content is wired through**: the panel writes `PortalPageContent`, the preview reads it, so an edit shows on the canvas immediately — My Requests' Statuses/Scope/Show genuinely filter and cap the list (`PORTAL_OPEN_REQUESTS` carries varied statuses precisely so a working filter doesn't look broken). Selecting an element clears the rail panel — the design panel IS the element editor. Preview renders the same tree with `enabled: false`, so it behaves like the real portal.
+- **Support Portal builder — spacing matrix, added sections, columns:** **`SpacingMatrix.tsx`** is ONE nested-box widget for both rings — outer = margin, inner = padding — because they are one idea (space outside vs inside). Whichever ring you touch tints it and renames the label above, so the control always says which of the two you are editing. **Vertical sides are px, horizontal are %** (the product default); the centre link ties ONLY the horizontal pair, and a side reads as plain text until clicked, then becomes an input + unit. The slider drives the last-touched side; the trash resets both rings. Values live on `NodeStyle.margin`/`.padding` (+ `marginLinked`/`paddingLinked`) and `styleOf()` applies them. — **Added sections:** `AddSectionSeam` renders a 12px invisible strip between blocks that becomes a **blue bar + grip + "+ Add Section" pill** on hover (the bar doubles as the section's bottom edge for stretching); the pill opens a picker of **10 `SECTION_LAYOUTS`**. ⚠️ Each tile is **drawn from the same `rows: number[][]` data the section is built from**, so a tile can never promise a shape you don't get. — **Dynamic nodes:** added sections aren't in the static `PORTAL_NODES`; their ids carry their shape (`sec-3`, `sec-3-c0`) and `nodeById()` synthesises the node from the id, so nothing has to thread the sections array through the canvas. — **Columns:** an empty column shows a grey `+` at rest; hovering/selecting reveals `ColumnAdders` — blue `+` at left/centre/right, where the sides insert a sibling and **`addColumn()` resets every weight in that row to 1** (equal width is the whole point of the affordance, so inheriting weights would be wrong). ⚠️ Toolbar axis follows the element: `card`/`column` get ←→, sections get ↓↑. — ⚠️ **The build is not a typecheck here** (TypeScript isn't installed; `npm run build` is esbuild only). A removed variable still referenced in JSX passes the build and blanks the page at runtime — verify in the browser after refactors.
+- **Support Portal builder — placing elements, working toolbar actions, colour & icon pickers:** **Drag to place** — Add-panel rows are `draggable` and carry the catalogue id on a custom `text/portal-element` MIME type. Two drop targets: a **column** (highlights blue) and a **seam**, which **auto-builds a one-column section** there so an element never has to be aimed into an existing section first. ⚠️ `dataTransfer.getData()` returns `''` during `dragover` by design — test membership with `dataTransfer.types.includes(...)` there and only read the value on `drop`. — **Blank on arrival:** `PortalPlacedElement` renders each type's empty state, and **`renderSpec()` decides `bare` vs card** — Text/titles/buttons/dividers/lists/nav land straight on the section's own surface with only its padding; only things that genuinely ARE cards get a surface. Placed instances register via `registerPlaced()` so `nodeById()` can describe them without a lookup table. — **Toolbar actions are all real:** move rewrites `blockOrder`/`rowOrder`/section order, delete removes, clear-padding zeroes the matrix, align cycles, `+` swaps the panel to the element library AND selects the target. **Duplicate is DISABLED on fixed page blocks** with a truthful tooltip — they have no instance identity to clone; only added sections and dropped elements do. ⚠️ **Ordering is CSS `order` on flex siblings**, handled once inside the `card()` helper, so a move is one number rather than a structural rewrite. **Bands take even slots, the seam after each takes the odd one** (`slot()`); a seam without its own order silently collapses to 0 and every lower seam disappears. The quick row keeps its `-mt-[62px]` hero overlap ONLY while it is first — that margin is a relationship with the hero, not a property of the row. — **`PortalColorPicker`**: theme palette first (a portal should be built from its palette), then Saved/Recent, then the spectrum (drag SV square + hue rail), HEX, eyedropper (only where `window.EyeDropper` exists), opacity. **`PortalIconPicker`**: 43 ITSM icons grouped the way a service catalogue thinks, search, and SVG/PNG/JPG/WebP upload capped at 512 KB. Wired to the action cards and to placed elements that render an icon. ⚠️ **Both are portalled to `document.body` with fixed positioning** — the design panel is `overflow-y-auto`, so an absolutely-positioned popover inside it is clipped the moment it is taller than the space below its field. — **Blue column adders belong to the SELECTED column only**; unselected columns keep a grey `+` that is still clickable (lighting every column put two `+` buttons either side of each shared edge).
+- **Support Portal builder — click-to-add, the seam's two affordances, independent style drawers:** **Clicking a library row ADDS it**, the same as dragging one — `addElement()` in `SupportPortalBuilder` picks the target: the column whose `+` aimed it (`addInside` selects that column, which is how the click knows), else the first FREE column of the section the selection sits in (a placed element stands in for its own column), else the built-in row you are in, else its own new section at the foot of the page. ⚠️ A full section falls THROUGH to a new section — a column holds one element, so reusing an occupied one would silently replace somebody's work. ⚠️ **EVERY palette row is addable, every time — there is no "Added" tick and nothing greys out.** The library used to disable anything already on the page (`isAdded`/`isSingle`/`placedTypes`, all removed, along with `SupportPortalAddPanel`'s `placedTypes` and `blank` props). The single-instance rule was ours rather than the product's — two request lists filtered to different statuses is a reasonable page, every placed element already carries its own id and its own config, so a second one is a second widget rather than a collision — and what it reliably produced was a palette that went dead as a page got built. ⚠️ **`PortalElement.onPage` still exists and still matters, but ONLY for the demo seed**: `SupportPortalBuilder` lays out one example section per element and must skip the components the page already renders as built-in bands, or an untouched page comes up carrying My Open Requests twice. What a page RENDERS and what an admin may ADD are two questions; `onPage` answers the first. ⚠️ **The one real single-instance limit is the AD action card** — `quick-ad` is a FIXED key in `WIDGET_FOR_NODE`, so a second one would have no spec and open nothing. `addElement` refuses it with a toast at the moment you try, which is where a limit with one instance belongs; a second AD-style card is built from the generic **Action Card** element (`reuse: 'many'`) pointed at AD self service. — **The seam has TWO affordances with different triggers**: hovering anywhere in a section offers the `+ Add Section` CTA (`withinSection` via `nodePath`), but the thick blue rule + grip is the section's bottom EDGE — a resize handle — so it appears only on hovering the seam strip itself (`showPill` vs `showLine`). Painting it across the page on every section hover made the canvas flash a heavy line for a grip nobody had reached for. — **The Layout/Style/Spacing drawers are INDEPENDENT, not a one-at-a-time accordion** (`openDrawers: string[]`, `DRAWERS` const, Expand all/Collapse all on the STYLE head): styling means moving between layout, colour and spacing on one thought, and a drawer that shuts the one you were reading makes you re-open it every time. Layout starts open — an all-collapsed panel looks like it has nothing in it.
+- **Support Portal widget drawer — the spec-driven settings panel (`WIDGET-CONTENT-AND-STYLING-SPEC.md`, steps 1–4):** five new files implement the spec's shell + control kit + style packs + flat widgets. **`portalStyleResolver.ts`** is the inheritance engine (§1.1/§8.2): `resolve(styles, id, key)` walks page → section → column → widget → item **per KEY** (not per node — a card that overrides its background still inherits its padding) and returns `{value, source: own|inherited|theme, fromName}`, which is what lets a field say "From Cards Row". ⚠️ **Revert DELETES the local key** (`revertKeys`), never copies the parent's value — a copy looks identical today and drifts tomorrow, which is the one-way override §8.2 calls a support-ticket generator. ⚠️ **`containerCss`/`boxCss` paint only values a HUMAN chose** — anything whose nearest source is `PORTAL_THEME` is skipped, because the page's resting look comes from Tailwind classes; emitting the theme as inline CSS would restyle every card the day the engine shipped and put the theme table in competition with the class list. `styleOf`/`sizeOf` in `PortalCanvas` now delegate here, so a value set on a section paints on every descendant that hasn't overridden it. **`PortalControls.tsx`** = the §3 roles (Field, Group, Badge, Note, InheritRow, Text/TextArea/RichText/Number/Slider/Segmented/Select/Toggle/Chips/ChipEditor/UploadZone) built from the project's existing 32px/`rounded`/#3D8BD0 chrome. ⚠️ `RichText` is deliberately NOT the product's `EditorToolbar` (a 900px Gmail composer) — it is the six controls the spec names, uncontrolled, mirroring its value only while unfocused so the caret doesn't reset. **`PortalStylePacks.tsx`** = P1–P8, authored once, every field an InheritRow. **`portalWidgetSpec.ts`** = the 28 widgets as DATA (fields, `tab`, `group`, `when`, packs, roles, notes, gate) + `WIDGET_FOR_NODE` (fixed page blocks) and `WIDGET_FOR_TYPE` (dropped catalogue elements) — ⚠️ **both routes must resolve to the SAME spec** or one widget edits two ways. **`PortalWidgetDrawer.tsx`** renders any spec: breadcrumb → title → Content/Styling tabs (remembered per layer TYPE) → groups (independent, remembered per widget type) → overflow ⋮. ⚠️ A field whose `when` fails is REMOVED and a group left with no fields is DROPPED — absent and disabled mean different things (§2.2). Everything else in the 65-element palette keeps `PortalElementPanel`; the builder routes on `specForNode(id)`. Config lives in one `widgetCfg` store keyed by node id with defaults on the spec, so Reset is a delete; `SupportPortalPreview` reads it through a `cfg` prop threaded down to `AddedSection`/`ColumnBody`/`PortalPlacedElement`, which is what makes live-apply real. ⚠️ **Button colours have NO stored defaults** — the spec says they inherit "from theme per style" and a stored default can't be per-style: seeding `textColor: #FFFFFF` for Primary painted white text on the white Outline button the moment you switched. Unset means the renderer picks per style. Still to build: §4 collection contract, the collection widgets (§7.9, 7.15–7.19), and structure/chrome (§7.20–7.24) — sections, hero and the rails still use the legacy editor.
+- **Support Portal — the collection contract and the six collection widgets (spec §4, §7.9, §7.15–7.19; build steps 5–6):** **`PortalItemList.tsx`** is the §4.1 list, built ONCE and reused by FAQ / Card children / Table rows / Slider slides / Gallery photos / Feedback questions: drag handle, index-or-thumbnail, primary + secondary label, duplicate/delete/hide, whole-row-opens. ⚠️ **Keyboard reorder is always visible** (drag is never the only way to move a row), **delete is immediate with an Undo toast** (a confirm dialog for one row trains people to dismiss dialogs), and **at `max` the Add button DISABLES and says why** — silent no-ops are forbidden. **`portalCollectionSpecs.ts`** declares the six as data via a `CollectionSpec` (`key`, `label`, `meta`, `seed`, item `fields`, item `packs`/`roles`, `subElements`, `childTypes`, `isTableRow`, `when`, `bulkAdd`); seeds are realistic copy, never `Untitled`. **`PortalCollectionRender.tsx`** draws all six, wrapping items and sub-elements in `<Sel>` so §4.3 is true — you reach a slide's Heading by clicking the heading. **Three layers, one shell:** `PortalWidgetDrawer` computes `parsed = parseItemId(nodeId)` and swaps `viewCfg`/`viewSet`/`viewFields`/`viewPacks`/`viewRoles`; L3 = widget, L5 = item, L6 = one field of an item. ⚠️ **Item ids hang off the WIDGET, not the selection** (`widgetNode = parsed?.widget ?? nodeId`) — building them off `nodeId` while an item is selected produces `el-1~i0~a~i…`, a node that does not exist. ⚠️ **An item's config lives in its widget's cfg** (`ownerOf()` in the builder): keying by item id would scatter one widget's content across N stores and break Reset/duplicate/reorder. ⚠️ **`registerItemName` must cover sub-elements too** or the Answer drawer is titled `a`, the raw config key. ⚠️ **Widget-level notes are gated to the widget layer** — repeating "these questions are authored, not fetched" on every question is noise. ⚠️ **Reuse comes from the SPEC's `single`/`many`, not the palette group** — FAQ and Card sit in Components but are repeatable, and the group rule greyed FAQ out after one use. ⚠️ **A placed element now gets its own `<Sel>`** in `ColumnBody`: without it the column was the innermost selectable thing, so a collection widget was reachable only through the breadcrumb. Palette additions: `c-feedback` (§7.9 had no element at all) and `c-services` un-flagged from `onPage` (it is §7.8 Featured Services, a favourites list — the page carries the *Request Service* action card, a different widget). `GridPicker` (§7.17, 10×10 cap, warns before shrinking discards cells) and `ChipEditor` joined the control kit. **Still to build: step 7 — §7.20 Banner (incl. the contrast guard), §7.21 Section, §7.22 Page, §7.23 rail, §7.24 top bar.** Those five still use the legacy `PortalElementPanel`.
+- **Support Portal — structure & chrome, and the contrast guard (spec §7.20–7.24; build step 7):** **`portalContrast.ts` + `PortalContrastMeter.tsx`** implement what §7.20 calls the most important behaviour in the file. ⚠️ It computes the **REAL** backdrop, not the one the settings imply: a colour fill → that colour; an image fill → the artwork's **average luminance sampled on a 16×16 canvas** (cached; a tainted cross-origin canvas returns mid-grey, the honest "cannot tell"), blended with the overlay; a background pushed to the page by §7.21's `bgScope: 'page'` → the PAGE's colour, because that is what is genuinely behind the text. Live ratio + verdict, warning below 4.5:1, one-click **Fix it** that tries a readable colour FIRST and only then walks the overlay up in 5-point steps — swapping text colour costs the design nothing, darkening artwork changes the look. ⚠️ It **warns, never blocks**, and is a permanent field rather than a validation that appears after the damage. Verified: white-on-dark reads 17.85:1; switching the band to a white fill drops it to 1.00:1 and Fix it restores 17.74:1. **`portalStructureSpecs.ts`** adds Banner · Section · Column · Page · Left rail · Top bar. ⚠️ **`noDelete`** on all of them — nothing in the palette could put a Banner back, so Delete is DISABLED WITH A REASON rather than absent. ⚠️ **`noAdd`** on the rail and the bar: their destinations belong to the PRODUCT, so there is no Add and no Duplicate/Delete per row — the admin orders and hides only. ⚠️ **The logo's hide action is disabled with a reason** (§7.24), not removed. Routing: `structureSpecId()` matches `hero`/`page`/`rail`/`header` and the three built-in bands by name, and `sec-N` / `sec-N-cM` **by shape** — checked AFTER the widget maps so a widget inside a section resolves to the widget. New controls: 9-point placement (`nine`), the contrast readout (`contrast`), and `preset` (⚠️ replaces every colour but KEEPS the typeface — trying palettes must never lose the font). Preview wiring: the hero honours height / 9-point content alignment / max width / heading colour / full bleed / search width + radius + placeholder, and the three bands honour `cols`, `colGap`, `padTop`/`padBottom`, `valign` (`secCols`/`secGap`/`secBox`; `card()` and `share()` gained a `gap` argument). ⚠️ **Still not wired:** an added section's Columns control does not restructure its `rows` array — column layout for `sec-N` is still set on the canvas via the layout picker and column adders. §7.22's light/dark palette pair and §7.23/§7.24's rail/bar styling write config but the chrome does not read it back yet.
+- **Support Portal widget fields — dynamic options and consequences (§2.2):** two mechanisms added while verifying Card. **`WidgetField.options` may be a FUNCTION of the config** — §7.15 only offers the Banner shape while the layout is Icon top, because a full-width bar has nowhere to go beside text (`optionsOf(f)` resolves it per render, never cached). **`WidgetField.consequence(value, cfg)`** returns `{patch, say}` for the §2.2 rule "changing a parent field that invalidates children clears them and says so": leaving Icon top with shape Banner sends the shape back to Circle and toasts why. ⚠️ A `templates` field may also declare `options` as an ALLOW-LIST, which `TemplatePicker` narrows the row to — the **Image element offers three of the four**, dropping "Text only": that template hides the picture, and an image with no image is not a variant of an image, it is a Text element under the wrong name with its alt text, crop and link all still on screen describing nothing. An action card keeps it, because a card without an icon is still a card. ⚠️ **A `when` gate belongs to the thing it depends on, not to the widget**: the action card's **Most used services** toggle appears only while the destination is *Request a service*, because it describes what the requester lands on — the same rule URL and Open-in-a-new-tab already follow. ⚠️ It ships **`mostUsed: false` in the spec defaults**: `ToggleRow` reads an unset key as ON (`cfg[key] !== false`), so a field that has only just appeared because you picked a destination would arrive having already changed what the card does. The repair is applied in the **same write** as the change — two writes would render an impossible intermediate state — and it is never silent, because a silent repair is how someone loses a setting they never saw change.
+- **Support Portal — the palette, and the widgets that own a real panel:** the element library is now **Data · Actions · Basic · Visual · Business · Custom** (`PORTAL_ELEMENT_GROUPS`). *Components* split into **Data** (backend-fed: My Open Requests, Pending Approvals, My Assets, My CIs, Announcements, Most Read Knowledge, Contact Us, Featured Services, Feedback, FAQ) and **Actions** (fixed destinations: New Incident, Request Service, AD Self Service, Knowledge); the **Layout** group was folded into Basic once it held only Divider + Advanced Tabs, and **Advanced Accordion was deleted** — one widget with two palette names edited two different ways depending on which row you clicked. ⚠️ Adding **AD Self Service** appends a real 4th card to `content.quick` (not a generic placed element) AND widens the row to 4 columns — a 4th card in a 3-column row wraps to a full-width row of its own, which is a different block that merely looks like a card. Specs written this session, all in `portalCollectionSpecs.ts` unless noted: **List** (`b-list`→`list_el`; items = title + description; Item Style authored once on the WIDGET so every point matches; Divider group), **Accordion** (`b-accordion`→`accordion`, its own spec, no longer a FAQ alias: Display rules + **Collapsed Style** / **Expansion icon** / **Expanded Style**), **Text with Image** (`b-text-image`→`text_image`; ⚠️ the image **floats** so text genuinely wraps — a flex row leaves whitespace under a short image), **Table** (Header · Rows · Table · Frame; no Style pack, no Columns editor, no Even-column-width toggle — columns are always an equal share), **Button** (DESIGN is two tabs, **Button style** / **Button text**, built from `designTab` + `when` gates rather than new drawer machinery), **Card** (Layout + Shape moved to DESIGN; padding/border/radius now read from the shared pack via `chosen()`; no P5 Media — an image's crop is edited on the image). ⚠️ **Recurring trap all session:** Vite hot-swaps a spec without its renderer, so the panel looks right while the canvas shows the old element — hard-refresh before judging any new widget.
+- **Support Portal — selection-model and layout bugs fixed (read before touching `Sel`):** ⚠️ **`Sel` renders a `<div>`, so it must never wrap a `<tr>`.** A div between `<tbody>` and `<tr>` takes the row out of the table box model — every row became its own anonymous table, columns stopped aligning and each cell sized to its own longest word. Table rows are unwrapped now (no per-row selection until `Sel` can render as a `<tr>`), and the table is **always `table-fixed` with a `<colgroup>`**. ⚠️ **`PortalItemList` keys every operation by INDEX, never `item.id`** — seeded items carry no id, so `x.id === item.id` compared `undefined` to `undefined` and matched EVERY row; hiding one item hid the whole list, and move/duplicate/delete had the same latent fault. The list also lost its index badge, gained **inline expand/collapse** editing (title + description, derived from the collection's first two fields via `inlineKeys`) and a **per-item hide-description** toggle (`descHidden`, honoured by both renderers). ⚠️ **Column adders now follow HOVER as well as selection, matched against the whole `nodePath`** — with an element selected inside a column the pointer is over the element, not the column, so an exact-id test silently removed the affordance; filled columns keep their side adders (centre one is empty-only). Panel chrome: right drawer opens at **340px** (`MIN_W`), section labels sit `mb-1` from their first field, every switch gets 20px above it and 6px to the field it reveals, `ShadowBlock` is self-labelled (no `Field` wrapper), and **per-field Reset + the "Overridden" badge are gone** — the design still resets from one button at the foot of the panel. ⚠️ **Shared option sets (`FONTS`/`WEIGHTS`/`FORMATS`/`ALIGN_4`) must be declared ABOVE every spec that references them** — module consts inside spec object literals hit the temporal dead zone at import, and esbuild does not typecheck, so the build stays green while the page goes blank.
+- **Support Portal — Theme, the portal's own style system (`PortalThemePanel.tsx`):** the rail's Theme item opens ONE scrolling panel, not a menu of screens. It was four cards that each opened a sub-screen, so comparing a font against a palette cost two navigations and you never saw them together. Now: a **Theme style** dropdown (8 styles; each row is ONE card painted in that theme — see the one-surface bullet below), a **Fonts** dropdown (one card per family, set in its own face), then **Colours** and **Custom**, both open. The Buttons screen is gone. ⚠️ Both dropdowns use the product's own field chrome (label over a 36px control + light chevron, as in the ticket detail page and the BOM tab) and open as an **instant popup layered over the panel** — inline expansion pushed the colour section 330px down, so choosing a font moved the thing you were comparing it against off screen. **Colours** = three tabs **Primary · Secondary · Neutral** with the **light/dark switch on the right of the heading** (mode is a fact ABOUT the palette — every swatch carries a light and a dark value and the switch says which you are editing). ⚠️ **Only PRIMARY varies by theme.** Secondary is the status language (green = healthy, red = broken) — re-tinting it would change what a colour MEANS; Neutral is the greyscale every surface is built from. So a theme owns four colours and the product owns the other thirteen, which is also why they sit behind tabs rather than one list. Swatches are **a name + a circle, no hex** (`ColorDot`) — a code beside seventeen rows is a spreadsheet, and nobody recognises a colour by its code. **Custom** = Page background / Heading text / Body text, overrides on top of the style. Applying a style is ONE write and clears overrides. **Mode is Light or Dark, no "auto"** — a portal is designed and looked at. ⚠️ **The theme paints through ONE wrapper**, not by rewriting every block — font + page colour are inline CSS vars (`--portal-heading`/`--portal-accent`/`--portal-btn-radius`) on the canvas div, and dark mode is a `.portal-dark` class the stylesheet answers (class beats a Tailwind utility on specificity, so it holds without `!important`; rules at the foot of `src/styles/theme.css`). ⚠️ `PortalPlacedElement`'s button radius/fill fall back to those VARIABLES, not a hard `6px`/`#3D8BD0` — an untouched button follows the theme, one that set its own keeps it.
+- **Support Portal — the child-selection model (read before adding a selectable child):** a widget's **heading**, its **"View all" link** and an action card's **icon** are nodes in their own right — clicking one selects IT (outline on the child) and the drawer shows only that child's Content + Design. Before this the drawer answered with the parent widget's whole panel: nine groups deep for a picture, and the Icon/Image tabs never appeared where you were looking. The recipe is four edits: a tiny spec in `portalPanelSpecs.ts` (`LIST_TITLE_SPEC`/`LIST_LINK_SPEC`/`CARD_ICON_SPEC`, built by `textSpec`), a match in `structureSpecId()` (`portalWidgetSpec.ts`) placed BEFORE the widget maps, a branch in `nodeById()` (`portalPageModel.ts`), and the suffix added to `ownerOf` + `specForNode`'s early-return list in the builder. ⚠️ **Config and panel resolve DIFFERENTLY on purpose**: `ownerOf` strips `-title|-sub|-viewall|-icon` so the value reads and writes on the OWNER's config (`title`, `viewAllLabel`, the `icons` store), while the PANEL resolves to the child's own spec. That is what makes inline editing and panel editing the same edit. The words are inline-editable via `Sel`'s contentEditable; the icon's click both selects the node and opens the shared `IconPopover`.
+- **Support Portal — resize semantics (`SelectionHandles` in `PortalCanvas.tsx`):** ⚠️ **Width is a PERCENTAGE of the parent** (`NodeStyle.widthPct`, 5–100), not a pixel count. As px with `maxWidth:100%` it could only ever SHRINK, it did not respond when the section or panel resized, and it let a small element ask for more room than its parent had. 100% is the parent's full width and is reachable by dragging. ⚠️ **Height is a real `height` + clipped content**, not `minHeight` — as a floor, dragging the bottom of a five-row list did nothing visible. The clip lives on an INNER box, never the wrapper: the toolbar (`-top-11`) and handles (`-3px`) are children of the wrapper, so clipping it made them vanish the moment a widget had a dragged height. Height is clamped to the parent BAND (captured once at mousedown — a band follows its tallest child, so a live measure lets the element chase a limit it is itself pushing), with the element's own `scrollHeight` as a floor under that ceiling or shrinking once would ratchet it smaller forever. There is a **bottom-centre grip** and NO bottom padding pill — the two shared one point and the pill won every click. ⚠️ The **top bar is the exception**: its south drag writes vertical PADDING (half the drag per side, capped 64), because its contents are vertically centred so extra height is just outside space — and the bar's `height` became `minHeight` or the padding had nowhere to go.
+- **Support Portal — undo/redo (`SupportPortalBuilder.tsx`):** SNAPSHOT-based, not a command log: eleven state atoms and edits arriving from four surfaces mean a log needs every one of them to remember to record itself, and the first that forgets makes undo skip a step silently. An effect on a `JSON.stringify` of all eleven pushes to `past`; `restore()` parses and sets them all. `Ctrl+Z`/`Ctrl+Shift+Z`, ignored while typing. ⚠️ The `applying` guard is cleared on a **`setTimeout(…, 0)`**, not in the effect — if a restore lands on a state identical to the current one React skips the re-render, the effect never fires, and clearing it there would leave the flag raised forever, silently swallowing every later edit. ⚠️ The stack holds STATES, so the current one is its last entry: undo pops that, keeps it for redo, and restores the one beneath. **KNOWN GAP:** deleting a built-in block is recorded (undo/redo enable correctly) but the block does not come back — text and config restore fine, so it is specific to the delete path's state.
+- **Support Portal — panel and rail chrome:** the design panel has **no header bar** — no close button, no divider. Reset moved onto the drawer's TITLE ROW, right of the element's name (`onReset` on `PortalWidgetDrawer`), because it has always been about that element rather than the panel. The rail is **Widgets · Theme · Branding · AI** (Templates removed; "Add" renamed because the rail names PLACES, not verbs), clicking a lit item CLOSES the panel (the toggle must run BEFORE `setCollapsed(false)` or the re-open wins in the same tick), and every rail panel opens with its rail item's name + one line. ⚠️ The **Design section is dropped entirely — heading AND body — when a widget has nothing to style**; gating only the heading left the shared Spacing block floating under Content. The **left rail widget** (`RAIL_SPEC`) is Content-only: one Icon-position control plus the destinations, no styling fields at all (it is the product's own navigation) and `noOpen` on its collection removes the per-item chevron into an empty drawer. The **hover name chip** is an outline chip on white, not a filled badge, with no step-up arrow — it was `pointer-events-none`, so the arrow looked like a control and behaved like an illustration. The **Branding** panel is support-portal-only (technician title, technician Help, the login-screen choice and the setup-guide image were removed — org-wide surfaces the builder cannot reflect).
+- **Support Portal — what the PANEL no longer holds (and why):** four whole sections were removed from the widget drawer this session, each because the canvas answers the same question better and a second control means the copy you are not looking at wins the last write. **Layout** and **Size** are filtered out for every widget at `groupsFor` + the pack list in `PortalWidgetDrawer` — not deleted from thirty specs — because the template picker and column adders set layout and the eight drag handles set size. ⚠️ **P2 goes with Size**: it IS the Size accordion in pack form, so dropping the group alone would leave the same fields under a different title. **Shadow** was gone from the shared **P1 pack** and the Table spec (⚠️ it came back 14 Sep 2026 as its own group — see the Shadow bullet below) — four controls (on, colour, inner/outer, position) for an effect a support portal almost never wants, sitting in the same accordion as the fill and border that decide how a block reads. A text child's **Alignment** accordion is gone too: the floating toolbar carries left/centre/right on the words themselves. ⚠️ Structure keeps Columns and Gap — a section's column count has no handle to drag.
+- **Support Portal — the Shadow group (14 Sep 2026):** every widget's DESIGN section has a **Shadow** group just above Spacing, in BOTH panel models (`ShadowGroup` in `PortalWidgetDrawer`): Add shadow · colour (with opacity) · Outer/Inner · 3×3 position. It writes the **STYLE store** (`shadowOn/shadowColor/shadowType/shadowPos`) and `containerCss` paints it, so built-in cards, bands, sections and placed widgets all read one value. Text CHILDREN (`-title`, `-sub`, `~item`…) get no group; a placed Text element does. ⚠️ **Exactly ONE element may paint it**: several call sites re-spread a node's style on an inner box its `Sel` already styled — harmless for a fill, twice as dark for a shadow. `paintsOwnShadow(id)` (= `paintsOwnSurface` + `b-button`) withholds it from the `Sel` wrapper; `StyledBox` paints it only for own-surface nodes; `card()` and the hero use `stInner`; the Button puts it on the button, since its wrapper is the whole column. ⚠️ `shadowString` uses the colour EXACTLY as picked — the old builder appended `33`, which made opacity decorative and turned an rgba() into an invalid value. ⚠️ **`PortalColorPicker` now READS rgba() back** (`parseColor`): it always emitted rgba below 100% but reopened it as opaque black, and swatch/hex picks dropped the opacity. The A field is a percentage.
+- **Support Portal — an action card's ICON node has the same Icon group (14 Sep 2026):** `CARD_ICON_SPEC` gained `{ id: 'icon', groups: ['G6'] }`, so selecting `quick-*-icon` (or a placed card's `el-N-icon`) shows Icon colour · Background · Corner radius · Border+stroke, plus Shadow and Spacing. The badge reads `iconBoxCss(styles, '<card>-icon')` and it WINS over the card-level `iconColor/iconFill/iconShape` (the more specific node). ⚠️ The quick badge uses `backgroundColor`, never the `background` shorthand — it also sets backgroundImage/Size/Position and React warned the moment the shorthand changed. ⚠️ `iconBoxCss` emits a shadow ONLY for `-icon` ids (`paintsOwnShadow` withholds it from the Sel): a data card's shadow belongs to the card, and reading it there cast it off the badge too.
+- **Support Portal — DATA CARDS are one selectable layer (14 Sep 2026):** every tile inside **My Assets, My CIs, Favourite Services and Most Used Services** is wrapped in `<Sel id="<widget>-tile">` — the SAME id on every tile, so clicking any card (or its icon) selects all of them and the panel restyles them together. Decided with the user: these are live records, so a style keyed to one record would vanish when it left the list, and one odd tile in a 2×2 block reads as a state. The panel is `DATA_TILE_SPEC` (`portalPanelSpecs`, routed by `-tile$` in `structureSpecId`, early-returned in `specForNode`, stripped by `ownerOf`) = **Icon** (`IconBoxBlock`: icon colour · background · corner radius · border + stroke, keys `iconColor/iconFill/iconRadius/iconBorder*`, painted by `iconBoxCss`) · **Style** (P1) · Shadow · Spacing. ⚠️ **Because the id repeats, `Sel` draws NO handles, toolbar or name chip for `-tile` ids** (`sharedTile`) — they would paint once per tile; the outline alone says all are selected. ⚠️ `BorderRow` gained an optional **Stroke** (solid/dashed/dotted), shown only while the border is above 0, so P1 offers it on every widget; its colour slot uses `ColorField compact` (swatch only) because the value text and chevron spilled out of 38px. ⚠️ **Most Used Services is back on the v2 default page** (`BLOCK_ORDER_V2` gained `services` after `favourites`), and `FeaturedServicesRender` lost its `?? 3` column fallback — four services in three columns orphaned the fourth on a second row.
+- **Support Portal — the section, end to end:** every section (built-in band or added) is **24px left/right, 12px top/bottom, no margin**, from one `SECTION_PAD` const. ⚠️ Three separate faults produced the old ragged rhythm: each band carried its own `mt-*` ON TOP of its padding; an added section put its padding on an INNER div while built-ins put theirs on the `Sel`; and the seam wrapper carried `px-6`, which added sections render inside, so they inherited a second 24px inset and sat right of everything else. ⚠️ **`fillCss` is applied to the section WRAPPER**, not the content row — on the inner box the colour stopped at the section's own padding and a filled band read as a tinted rectangle in a white gutter. ⚠️ **No seam under the hero**: the action cards ride up into the banner by 62px, so a section inserted there lands inside an overlap and splits a join that is deliberately one unit. ⚠️ **Alignment only appears once the section HAS content** (`hasContent`, DERIVED per render from `sections` — a stored flag would need every add/remove/undo path to remember it). `PanelAccordion.when` exists for exactly this.
+- **Support Portal — the banner image's COLOUR LAYER is Solid or Gradient (15 Sep 2026).** Under "Colour layer
+  over the image" the Background group shows one control, `overlayLayer` → `OverlayLayerEditor`
+  (PortalBannerTools): **Solid** = one colour whose opacity is set in the picker (`overlayColor`, an even
+  wash); **Gradient** = Linear/Radial, an angle (number + Rotate 90°), Reverse, and a preview bar over a
+  checkerboard with draggable stops (click the bar to add one, up to six, two minimum) plus a stops list
+  (position %, colour with opacity, remove). Keys: `overlayMode` ('solid' | 'gradient'), `overlayColor`,
+  `overlayGradient` = { type, angle, stops[{pos, color}] }. The band paints `bannerLayerCss(heroCfg)`.
+  ⚠️ The old `overlaySide` / `overlayFrom` / `overlayTo` fields left the panel, but `layerGradientOf` BUILDS
+  the gradient from them when none is stored (side → angle via `SIDE_ANGLE`, centre → radial), so an existing
+  banner looks identical until someone edits it.
+- **Support Portal — drag to move, anywhere, including onto the BANNER (15 Sep 2026).** ⚠️ **The root cause of
+  "drag doesn't work in many places":** `placeable()` in the builder still tested the pre-tree column id
+  `sec-N-cM`, so every drop onto a column (`sec-N-bM`) resolved to its whole section — a branch with no slot —
+  and was refused with "Drop it on a section, a column, or a seam". It uses `isBoxId` now. **The banner:**
+  it is not a column or a row, so `Sel`'s drop resolves the nearest `[data-banner-cell]` (or the banner's own
+  background) and calls `moveToBanner(src, anchor)` / `dropIntoBanner(type, anchor)`: onto an EMPTY SLOT
+  (`bn-slot`) the widget takes the slot's place and the slot goes; onto another banner item a banner item
+  SWAPS (`swapLeaves`) and a widget from the page lands BESIDE it; onto the background it is appended. A
+  widget leaving the banner for a page column goes through the ordinary `relocateElement` (its
+  `detachElement` already clears `rowExtras.hero`, and `normalizeTree` drops the leaf). `Sel` also accepts
+  NEW library elements on the banner area only — everywhere else the columns and seams own that. Verified
+  with real drags: banner → slot, banner → page column, column → column, column → banner, library → banner.
+- **Support Portal — Figma-style GAPS, banner edge adders, banner image CROP (15 Sep 2026).**
+  **Gaps:** every section, box and built-in band has a panel **Gap** pair (`gapPair` control → `GapPair`:
+  columns | rows, "Mixed" when rows or columns inside differ). Keys: an added section / box stores `gapX` /
+  `gapY` (a box without its own takes its section's); a built-in band stores `colGap` / `rowGap` (rendered
+  as the `gap` shorthand via `secGapCss`). The panel writes `gapPairX/Y`, which `patchCfg` redirects — on a
+  SECTION it also clears every nested box's own gap, so typing a value resolves "Mixed". `cfgFor` seeds the
+  effective `__gapX/__gapY`, `__gapMixedX/Y` and `__branch` via `gapSeed`. `BoxChildren` reads them (and
+  passes the gap into each column's flex-basis calc — it used a fixed 16) and carries `data-gap-parent`.
+  Selecting a section or box shows pink `GapBands` for every row/column inside (`boxMode`), each writing
+  the gap of the box that lays it out. ⚠️ A node created and selected in the SAME render mounts its bands
+  before its own ref is attached (a child's layout effect runs first), so the bands retry next frame —
+  without that, a freshly added section never showed them. **Banner edge adders:** hovering the banner
+  itself (`hoverId === 'hero'`) shows its four + adders; they put an empty cell at the banner's EDGE
+  (`insertAtEdge`), where an item's adders put it beside that item. **Crop:** double-clicking the banner's
+  background (with an uploaded image) opens `BannerCropper` — the whole picture, faded outside the band
+  and sharp inside it (a clipped second copy), a pink frame for the band, drag to move, corners to scale
+  (opposite corner stays), Fill banner / Fit whole image / Reset / Done; Enter, Escape or a click elsewhere
+  closes. It writes `bannerCrop = { scale: width as % of the band, x, y: background-position % }` live, and
+  the band paints it through `heroCropCss` (`data-banner-band` marks the band for measuring).
+- **Support Portal — text has two modes: FRAME and WORDS (15 Sep 2026).** Selecting a text node selects its
+  frame; clicking into the words starts editing (`editing` state in `Sel`, set on the editor's focus). A
+  placed Text (`el-N`) shows its ELEMENT toolbar in frame mode and swaps to the TEXT toolbar while editing; a
+  text child (a heading, a card title) keeps the text toolbar in both. While editing WITH words selected, the
+  text toolbar's B / I / U, colour, highlight, font, size and clear formatting act on THOSE words
+  (`applyInline` → `document.execCommand` with `styleWithCSS`; font/size via `wrapInline`, which turns
+  `fontSize 7` into a span); with only a caret they style the whole node as before. ⚠️ The word selection is
+  SAVED on every `selectionchange` (`INLINE_RANGES`) and restored before each command, because pressing a
+  select or the colour spectrum moves focus out and the browser drops it; the toolbar's `onMouseDown`
+  prevents default for its buttons for the same reason. ⚠️ A blur caused by the toolbar or a popover
+  (`[data-portal-toolbar]`, `[data-portal-popover]` — the colour picker carries it) does NOT end the edit;
+  a mousedown anywhere else commits and ends it. **Storage:** a rich node commits its whole innerHTML; a plain
+  line commits the markup INSIDE its innermost text element only when the words carry formatting, otherwise
+  its plain words. `richify()` renders a stored string containing inline markup as markup (canvas, Preview,
+  published). ⚠️ After a commit the editor remounts (`textVer` key) — React must not reconcile against text
+  nodes the browser's commands already rearranged. ⚠️ **Old bug fixed on the way:** `setText` matched the
+  generic `<card>-title|sub` pattern before `hero-title`/`hero-subtitle`, so inline edits of the banner's
+  heading and subtitle were written to `title`/`sub` on the wrong owner and never showed. Known gap: a panel
+  text field shows the stored markup as raw HTML.
+- **Support Portal — resize, part three: EVERY EDGE MOVES ALONE (15 Sep 2026).** The handle you hold follows
+  the pointer and the opposite edge stays put. ⚠️ A width lays out from the left, so the LEFT handle writes
+  `margin.left` (% of the parent) by the same amount the width changes, and the TOP corners write `margin.top`
+  (px) against the height — before this, shrinking from the left pulled the right edge in and growing from
+  the left pushed the element right. Three layouts, three rules (`SelectionHandles` move handler):
+  **standalone** → `widthPct` + margin, clamped so the element never passes its parent's edges;
+  **Fill row (flex)** → the edge trades width with the neighbour ON THAT SIDE only (flex shares written as the
+  px widths they should come out at), and an outermost edge with no neighbour makes room with its own margin;
+  **grid** → ⚠️ width and margin resolve against the element's own TRACK (`gridTemplateColumns`), not the grid
+  — measured against the grid, a left drag on one of three work-row cards moved its right edge 168px.
+  ⚠️ The start offset is measured from the parent's content edge, not the computed margin: a flex item
+  centred by `align-items` has margin 0 while sitting 100px in. Such a centred item is PINNED on its first
+  resize (`alignY: 'start'` + its current offset as margin) so one edge moves instead of both.
+  ⚠️ The handles layer is `z-[35]`: the add-section strip between bands (`z-30`) covered the top/bottom
+  corners and turned corner drags into section drags. The banner's groups (`hero-copy`) have handles again.
+- **Support Portal — resize, part two:** the **top-centre grip drags the GAP above** an element (margin-top, down to **−120px** so a card can ride over the band above it), because height is what the bottom edge is for and dragging the top to grow something moves it into the block above. ⚠️ Its bottom padding pill was removed — the two shared one point and the pill won every click. ⚠️ **Both side handles are squares that resize**; the left one used to be a rounded pill dragging horizontal padding, so one element's two sides looked like different controls and did different things. ⚠️ The **top bar is the exception**: its south drag writes vertical PADDING (half the drag per side, capped 64), and the bar's `height` had to become `minHeight` or the padding had nowhere to go.
+- **Support Portal — Branding and the logo:** the Branding panel is now ONLY: Portal name · Company (read-only) · Portal URL (read-only) · Support Portal Title · Landing Page for Guest Users · **Sign-on** (Identity Provider) · **Contact shown on the portal** (Support Email, Support Contact No.). ⚠️ **EVERY row goes through `Field`.** `ReadOnly` used to carry its own `mb-4` while `Field` spaces with `mt-4 first:mt-0` — bottom margin against top margin, so the first pair on the panel (Portal name → Company) had NO gap while a `Field` following a hand-spaced row got a double one. One wrapper owning the rhythm is the only way that cannot come back; measured, every row is now 74px apart. ⚠️ **`Head` has NO rule under it** (`mb-1 mt-7`, no `border-b`): a heading and its fields are one block, and a hairline between them cuts the title from what it titles — the line lands where the relationship is strongest instead of where the sections divide. The space ABOVE is what separates one section from the last. ⚠️ **No "Inherited" badge and no grey ⓘ Note cards** — both removed on request. The badge appeared and vanished as you typed, a label that moves while you use the field, on a panel where the placeholder already shows the fallback; the `Inherited` and `Note` components are gone entirely (`Info` stays, for the Help Icon tooltip). ⚠️ **The logo left this panel entirely**: `LOGO_SPEC` (`header-logo` → `'logo'`) gives it its own layer with an upload container in CONTENT and the SHARED G1 style pack — it used to resolve to the top bar, so clicking the one image on the page opened the bar's colour and height with the upload third in a list about something else. NO Layout accordion: `logoPos` lives on the BAR because it is a position relative to the actions. ⚠️ Every `UploadZone` with a value now shows a **92px preview on a chequerboard + "Replace image"**, not "Remove" — these slots are always filled, so swapping is the common move and the destructive verb was on it.
+- **Support Portal — surfaces and text styles (two bugs worth remembering):** ⚠️ `x-action-card` and `x-kpi` are NOT in `CARD_TYPES` — they paint their own surface from config, and `Surface` was wrapping them in a second white bordered box with 16px padding, so they rendered as a card inside a card with the outer one ignoring every fill and radius the panel offered. An element that paints its own surface must be `bare`. ⚠️ **`Sel` now spreads `styleOf` for `kind === 'text'`**: it only ever applied `sizeOf`, and every other node type has a call site that spreads `st(id)` itself — a text child of a placed element has none, so the floating toolbar wrote bold/italic/underline/size/colour and nothing read them back. Restricted to text so a container cannot pick up a second background from that path.
+- **Support Portal — the icon picker and the text toolbar:** clicking an icon selects the **icon**, not its card — `pickIcon` used to `setSelectedId(cardId)` immediately after the canvas had selected `'<card>-icon'`, so the popover opened with the parent outlined and in the sidebar. The VALUE still keys off the card (`icons[ownerOf(id)]`); only the selection differs. The picker's upload is a **primary button reading "Upload SVG or PNG"** — bringing your own mark is the one thing the 43-icon grid cannot do, and it was styled as a dashed drop zone. ⚠️ The **inline text toolbar is WHITE** like every other floating toolbar, and its colour control is a real button opening `PortalColorPicker` with a Canva-style A-over-a-colour-bar glyph: it was a native `<input type="color">` at `absolute inset-0`, and the UA stylesheet's width on that input beats the left/right offsets, so it spilled onto the alignment buttons — which is why clicking "align left" opened a colour picker.
+- **Support Portal — element preview on hover (`PortalElementPreview.tsx`):** hovering any row in the Widgets library opens a dark card to its LEFT — a sketch on a dotted ground plus one line on WHY you would reach for this element rather than the row above it. A name is the worst possible description of a visual element ("Card", "Action Card" and "KPI" all sound plausible for the same job). ⚠️ **Each sketch is the shape THAT element actually makes**, checked against its real renderer — all 21 visible elements have one, none falls through to the generic block. ⚠️ **ONE sketch per element, never a stack of variants.** Four stacked wireframes made the card twice the height of the row it belonged to (Text was 457px; it is 215px now) and forced the reader to scan a column to find the one they meant. Where an element genuinely has a range, the range is laid out INSIDE the one sketch: **Button is a 2×2 grid** of four real buttons — filled / grey / outline / text link, with real labels — at the sketch's full width. ⚠️ **Text shows REAL WORDS**, not bars: heading + body + caption in one sample. Text is the one element whose whole substance is the words, so a bar sketch of it says nothing a bar sketch of anything else does not. ⚠️ **Groups are told apart by SHAPE, elements within a group by their ICON**: *Data* = a full card with a header (icon · title · count · view-all) over its own row shape; *Actions* = a small icon-and-two-lines card, **all four deliberately identical** because they ARE the same card on the page, so the badge glyph is the only difference, exactly as a requester sees it; *Basic* = content sitting straight on the page ground with **no card of its own** (which is literally how `renderSpec()` marks them, `bare`); *Visual* = a framed picture with a caption; *Custom* = cards whose interiors are unlike anything else (label/value pairs, a tile grid, question rows, a big numeral). ⚠️ **The icon is passed in as a PROP, not imported** — `SupportPortalAddPanel` imports this file, so reaching back for `elementIcon` would be a cycle. One registry, one direction. ⚠️ **Every Tailwind class here is written out as LITERAL text.** A class built by interpolation (`` `bg-[${ACCENT}]` ``) never appears in the source Tailwind scans, so the utility is never generated and the element silently renders unstyled — nine of them were caught before the first browser check. ⚠️ Portalled to `document.body` with a measured rect — the library scrolls, and the card's height depends on its copy. Every unlisted element still gets a generic card; falling back to nothing would feel broken on exactly the rows people are least sure about.
+- **Support Portal — the element hover card is COMPACT (28 Sep 2026, Zeni's pick).** Supersedes the
+  size and the text of the bullet above: **240px wide, a 72px sketch stage, then the name and ONE
+  summary (`what`) clamped to two lines**. The sketch stage is SQUARISH (Zeni, same day): the frame is
+  the card's width less **12px on all four sides** (`STAGE_PAD`), at least 149px tall at native size
+  (~112 on the card, `ART_MIN_H` — first 176, then 10px taken off the top and the bottom on request),
+  with its drawing centred, so the upper part is ~240×136 and the card ~240×190–207. The text part keeps its own padding. The second sentence (`helps`) and the `note` are still on
+  every `PREVIEWS` entry and simply not rendered. ⚠️ The sketches are NOT redrawn: each is laid out at
+  its original width (`ART_W` 288) and SCALED to fit the stage on both axes (`useLayoutEffect` measures
+  it), so a tall one (Table) shrinks further rather than being cut off. Every sketch measured inside its
+  stage with 12/12/12/12 around the frame.
+- **Support Portal — EVERY colour picker has Light · Dark tabs and opens on the portal's mode (28 Sep 2026).**
+  The floating toolbar's pickers opened with ONE value and no tabs, so a colour set there only ever
+  reached whichever mode the canvas was showing. The tab now lives INSIDE the picker: pass
+  **`pair={{ light, dark, onChange(mode, v) }}`** (`ColorPair`) and `PortalColorPicker` draws the tabs,
+  edits the one showing, and **opens on `portalColorMode()`** — every time it mounts, never remembered —
+  so with the global theme on Dark the Dark tab is already selected. `ColorField` / `ColorDot` now pass
+  their `modes` straight through as `pair` (their own tab state is gone). ⚠️ **Cancel restores BOTH
+  halves** (`onCancel` on the body); the old single-value Cancel wrote the light colour into the dark
+  slot after a tab switch. **Storage is the panel's**: light = bare key, dark = `dark:<key>`. In the
+  canvas `colorPair(own, key, fallback, write, extra?)` builds a pair for EITHER store — it reads
+  `light:<key>` first, because the builder's resolved config promotes the dark value onto the bare key
+  in dark mode — and `shownOf(pair)` is what a toolbar swatch displays. Wired: Background (with its
+  `fill`/`bgFill` switch riding along as `extra`), Border, the Icon popup's three colours, Text colour,
+  Highlight, the banner's Border, and the banner's Solid colour + image colour layer (`cfgPair` in
+  `PortalBannerTools`). ⚠️ **Two deliberate exceptions**: colouring SELECTED WORDS has no tabs (it becomes
+  inline markup, which has no dark half), and **gradient stops** have none (a gradient is one stored
+  object, and a dark copy would drift the moment a stop is added on the light one). Verified in a
+  browser: light portal opens on Light, dark on Dark, each tab paints only its own mode, and Cancel
+  after editing both tabs restored both.
+- **Support Portal — Favourite and Most Used Services share ONE row by default (28 Sep 2026).**
+  `browseLook` now defaults to `'split'` (a template can still ask for `'stacked'`), so both render side by
+  side at equal width (429px each on the default page) from the favourites band. ⚠️ Split ONLY while BOTH
+  bands are on the page (`hasBand`): the split row is drawn from the favourites band, so with Favourite
+  Services deleted it would have taken Most Used off the page too. ⚠️ In the split row each grid defaults
+  to **2 columns** (`{ columns: 2, ...wc(id) }`) — four tiles at half width were 98px and the names ran into
+  each other; an admin's own column count still wins (style store, then config).
+- **Support Portal — the two service rows are WHITE CARDS with their title inside (29 Sep 2026).**
+  `titlePlace` defaults to `'inside'` for Favourite and Most Used Services too (spec defaults AND the two
+  renderers' fallbacks), so each is a white card like every other data card — 14px radius, 1px #E5E7EB,
+  same left/right edges and 16px gap as the cards below. Its tiles take the light-grey **data-tile fill
+  `#F6F9FC`** with no shadow (white on white left only a hairline between tile and card). "Above the
+  card" still puts the heading back on the page. The inner card is `px-4 pb-4 pt-3.5`, matching the
+  title's top inset to the other cards'.
+- **Support Portal — closing the tour dock PARKS it in the right rail (28 Sep 2026).** The dock's ✕ unmounts
+  it and sets `dockParked`; a dark `#1F2937` **"Basics"** button with the dock's glyph (`DockGlyph` =
+  lucide `CirclePlay`, exported from `PortalTourDock` and also shown in the dock's header) sits at the foot
+  of the rail (`mt-auto`, `data-portal-dock="parked"`) and reopens it. Hidden while the dock is open. The
+  old Minimise button and the bottom-right "Editor basics" pill are GONE — one way to put it away, one
+  place it waits. ⚠️ Probe gotcha: React writes the bare `data-portal-dock` attribute as `"true"`, not
+  `""`, so select the open dock with `[data-portal-dock="true"]`.
+- **Support Portal — colour picker (`PortalColorPicker.tsx`):** spectrum → **horizontal** hue rail + alpha rail with the live colour beside them → `Hex · R · G · B · A` fields with labels UNDERNEATH → a fixed 24-swatch grid (theme colours first, then presets) → **Done / Cancel**. ⚠️ **No Recent list**: it is per-browser, so the shortcut two admins see is different and neither matches the palette — and on a themed portal it is the exact move the theme exists to make unnecessary. ⚠️ **Cancel restores the value the popover OPENED with** (`opened` is a ref, not state — every drag re-renders and a state copy would track the exploration it exists to undo); the spectrum is dragged, so every intermediate colour lands on the page as you move. ⚠️ The hue rail reads **x, not y**, now that it runs under the spectrum. `ColorDot` is the swatch-only field used by the Theme panel.
+- **Support Portal — the floating toolbar is fully functional (`ElementToolbar` in `PortalCanvas.tsx`):** `⠿ ← → + ⧉ [3 aligns] 🗑`. (1) ⚠️ **A placed element has TWO homes** — a section column, or a built-in row via `rowExtras` — and `deleteNode` only ever looked in the columns, so anything dropped into Quick Actions or a cards row reported "Removed" and stayed on the page (this is why deleting a Spacer looked broken). Both homes are cleared; the element lives in one, so the other pass is a no-op. Sections and columns already had their own branches. (2) **"+" opens the element library ON THE CANVAS** (`ElementPicker`, same `PORTAL_ELEMENTS` catalogue as the Add panel — the icon registry is exported from `SupportPortalAddPanel` as `elementIcon` so two maps can't drift). On a container it ADDS; on a filled element it **replaces in place**. ⚠️ `replaceElement` mints a NEW id rather than mutating the old one's type — config and style are keyed by id, so reuse would leave a Divider wearing a Button's stored padding. ⚠️ `addInside(id, type?)` places directly when given a type, and `addElement(type, anchorOverride?)` takes the anchor as an ARGUMENT — `selectedId` has not re-rendered when the toolbar picks, so reading state would aim the add at the previous selection (the call goes through `addElementRef` because `addElement` is declared after `addInside`). (3) **Drag moves across sections**: `moveTo` used to refuse anything outside the source's own list, so the only way to move an element between sections was to delete and rebuild it. A placed element now relocates onto any column (or onto another element, landing in its column) via `detachElement`/`relocateElement`; landing on an OCCUPIED column **swaps** the two — overwrite was the one gesture here that could destroy work. (4) **Duplicate clones config AND style and selects the clone** — cloning the placement alone produced a blank element wearing the original's name and left the panel pointing at what you copied FROM. (5) **Three alignment buttons, not one that cycles** — a cycling control makes you read a tooltip to learn your state and click twice to reach the third option; the lit one also answers "how is this aligned?". Axis-aware: left/centre/right for card+column, top/middle/bottom for sections.
+- **Support Portal — the rich text editor (`RichText` in `PortalControls.tsx`):** font style full-width on TOP (`BlockFormat` gained a `wide` variant), the writing surface at `min-h-[200px]`, and the actions in a **38px VERTICAL rail beside it** that scrolls. ⚠️ Sixteen controls across a 340px panel wrapped to three rows that REFLOWED on every panel resize, so a button was never twice in the same place; stacked in a fixed column they hold their positions and the overflow scrolls in the one direction that costs the text nothing. Rail order is fixed by what a control ACTS ON — `B·U·I` (a word) | `align L/C/R · bulleted · numbered` (a paragraph) | `strikethrough · quote · indent · outdent · link · undo · redo · clear` (the document) — a rule a reader can infer, where "most used first" is a ranking only we can see. ⚠️ **Image and video were REMOVED**: a portal element is authored, not composed — an image belongs on the page as an Image element the builder can place, select and style, and one pasted inside a paragraph is invisible to all of those tools. ⚠️ Every button still needs `onMouseDown → preventDefault` or pressing it blurs the editor, the browser discards the selection and the command lands on nothing. The dark FLOATING text toolbar on the canvas (`TextToolbar`) is a separate surface and still horizontal.
+- **Support Portal — the entry point, the two tabs, and the listing (`AdminSupportPortalModule.tsx` + `AdminSupportPortalSettings.tsx`):** the module lives at **Support Channels › Support Portal** and has **ONE destination with two tabs**, not two nav rows: **Customization** (what the portal looks like) and **Settings** (what a requester may do on it). ⚠️ The **Organization card was REMOVED, not left behind** — a second door onto the same builder means an admin has to remember which of two identically-named rows holds the thing they want. `CARD_MODULES` is keyed `'Support Channels/Support Portal'`. ⚠️ **The head sits ABOVE the tab strip and does NOT change with them** — a title that rewrote itself per tab would read as two different pages sharing a nav row, and saying which view you are in is the strip's job. A `shell(body)` helper renders head → tabs → pane once, so the empty state, the listing and Settings cannot drift apart. ⚠️ The `tabs` const must be declared ABOVE the empty-state return that uses it — it was 45 lines below, a temporal dead zone that stayed silent only because `pages` seeds with one page so that branch never ran. **Listing columns = Portal name · URL · Status · Enabled · Action**. The `SPP-#` pill is gone (nobody refers to a portal by it) — the NAME is the link into the builder, carrying a `Default` badge. ⚠️ **Status is ONE cell holding a sentence**: the `Published`/`Draft` pill, then "N days ago by <person>" (`relPortalStamp()` — the record keeps its full stamp; the column answers the question actually being asked), then the amber **Unpublished changes** chip gated on the new `PortalPage.dirty`. Split across three columns those stop being one story. ⚠️ **The default portal's Enabled toggle and Delete are DISABLED WITH THE REASON on them**, not hidden — requesters have to land somewhere, and a rule that silently removes an action reads as a bug. ⚠️ **`portalUrl()` is a PATH, not a hostname**: `support.acme.com` for the default and `support.acme.com/<slug>` for the rest — the first pass built `support.<slug>.com`, which reads like every portal owns a domain someone registered. ⚠️ It returns **`p.url` when the record has one** and only derives from the name otherwise — the derived path is a suggestion for a portal nobody has addressed yet, and once Edit details is saved a name-derived URL would be telling the admin the field they just filled in did nothing. The row’s **Action column is an ICON RAIL** (`RowActions`), matching every other listing in this product (`SoftwareLicensesTable` is the reference): **Edit ▾ · Preview · Copy · Delete**, `size={15}`, `text-[#6B7280] hover:text-[#3D8BD0]` with red on Delete. ⚠️ **Edit is TWO things behind one icon** — *Edit details* (what the portal IS: name, company, address, sign-on) and *Customise portal* (what is ON it). They are both editing, never done in the same moment, and no pair of glyphs separates them; a chevron on the pencil says there is a choice without spending a second slot. ⚠️ **Copy duplicates the whole portal — details included — and opens Edit details on the copy immediately**: the copy inherits the URL, two portals cannot answer on one address, so it asks at the one moment the admin already knows a change is needed (`copyPortal` → `duplicate()` returns the copy → `setDetailsId`). The name is seeded `uniquePageName(pages, src.name)`, i.e. as close to identical as the uniqueness rule allows, not `"X copy"`. ⚠️ **Three kebab items did NOT survive and should not come back**: Portal settings and Reset layout are both reachable inside the builder, and Copy link duplicates the URL column, which is already a working link. ⚠️ The dropdown is **portalled to `document.body` with fixed positioning** (re-measured on scroll/resize): the table sits in an `overflow-x-auto` wrapper, which clipped the old kebab menu to a 6px sliver — the same trap the drawer tab-strip note warns about. The list search matches only what the listing SHOWS (name / modified-by / status) — searching a column that is no longer rendered is a dead end.
+- **Support Portal Settings tab (`AdminSupportPortalSettings.tsx`):** nine accordions transcribed from the live product screen in product order — **Request · Service Catalog · Change · Asset · CMDB · Knowledge · Approval · Digital Signature · User**. **Request is expanded on arrival; the other eight start collapsed.** Row kinds are `toggle | radio | number | chips`. ⚠️ **Dependent rows are REMOVED when their parent is off, not disabled** (`r.needs` / `r.when`) — a greyed Grace Period under a switch that is off is a control explaining a state you can already see. ⚠️ **Search matches ROWS and force-opens the groups that match** (`isOpen()` returns true while a query is live) — a search over nine collapsed sections that only matched headings would look broken the first time somebody typed a setting name. Two independent Grace Period blocks (Resolved → `Days`/5, Closed → `Unlimited`); **Digital Signature is the only toggle that ships off**.
+- ⚠️ **This project's Bash tool (Git Bash on Windows) STRIPS backslashes inside heredocs** — `node <<'EOF'` receives `d` as `d`, so any anchor string containing a regex silently fails to match. Either write the script with the Write tool and run the file, or pick backslash-free anchors. (Same root cause as the older Audit-Trail sweep note.)
+- **Ticket Fields show 7 upfront (V1 Ticket/Problem/Change/Release):** `getFilteredTicketFields` in `TicketDrawerUtils` now puts Urgency+Impact in `basicFields`; the accordion renders Status · Priority · Assignee · Technician Group · Urgency · Impact · **Tags (#7)** before the **View more** button (Category/Department/Source/Location/Vendor/Support Level + System Fields stay behind it). The Urgency/Impact/Tags JSX block in `TicketFieldsAccordion` is UNCONDITIONAL now; the `showMoreFields` block starts at Category. V2 is unaffected (own `V2_TICKET_FIELDS` list).
+- **Tags chip row in the asset/procurement/patch accordions:** `AssetFields` has a shared **`tagsRow`** const (chips + "+ Add tag" inline input, local `assetTags` state seeded `production`/`critical`, search-gated on "tags") rendered as the **last upfront field before "View more"** in the default variant (Hardware/Software/Non-IT/Consumable/CMDB) AND in the contract + purchase variants; on the PATCH page it's spliced after "Refrence Url" (`tagsAfter` = `'OS Version'` in `endpointMode`). License keeps NO tags (2 fields only).
+- **ServiceOps AI welcome is module-aware:** `aiWelcome` in `TicketPropertiesPanel` (right after `handleQuickAction`) returns `{ desc, prompts[] }` per mode — checked most-specific-first (endpoint → patchDeploy → patch → license → contract → purchase → cmdb → software → asset → ticket) because patch-family drawers also pass software/nonIt flags. 3–4 gradient prompt pills each (e.g. Patch = Summarize Patch / Assess Vulnerability Risk / Check Impacted Endpoints / Check Supersedence); unknown prompts fall through to the generic canned AI reply. The in-chat scrollable quick-pills row (AI Summary/Next Action/…) is still generic.
+- **Audit Trail entries are module-specific** (9 files swept): each drawer's audit mock array now tells that module's story (e.g. PatchDeployment = Status Draft→Ready to Deploy, Install Window Scheduled, Created from PCH-4345) instead of the cloned asset-depreciation events; same shape (`{user,initials,color,action,details,field?,from?,to?,time}`), times split across two day-groups. CMDB History tab categories trimmed to **Audit Trail · Change Logs · Scan History**.
+- **Pagination**: `Paginated.tsx` is a reusable **auto-hide** wrapper (render-prop `children(pageRows)`; `rows`/`perPage`/`sticky`/`bleed`; pagination bar only renders when rows overflow one page) around the redesigned `Pagination.tsx` (10/20/25/50/100 per-page, ellipsis page list, icon prev/next, "Showing X–Y of Z"). Wired into the Patch grids + Vulnerabilities; the License/Purchase/Software-Asset/History tables are NOT yet wrapped (audit: most hold only 2–10 mock rows — user chose the auto-hide-when-it-fits strategy, remaining coverage optional).
+- **Requester profile popup (`RequesterProfilePanel`)** — Ticket/Problem/Change/Release: clicking the requester name or "View more details" opens a right-side popup with tabs **Overview · Recent Requests · Assets · CI** (drawer-style underline tabs); Overview = full profile field list + card previews of each list with View-more jumps; `deriveRequester` is exported from `TicketPropertiesPanel`.
+- **Close-button standard (all side/center popups, 26 files)**: the ✕ is `flex size-8 items-center justify-center rounded transition-colors hover:bg-[#F3F4F6]`, vertically centered against the header text (`items-center`). Small chip-remove ✕ buttons (icon ≤14px) are deliberately excluded.
+- **Control corner radius = `rounded` (4px) EVERYWHERE**: after a 3-pass sweep (~1,090 replacements), ALL interactive controls in the detail pages share the 4px radius — icon buttons (every size-7/8/9 box), text buttons, sub-tab/filter pills, search/form inputs, selects, textareas, chip-input wrappers, segmented view/format toggles, pagination controls. Deliberately KEPT at their own radius: dropdown menus/popup cards/modals (surfaces), `rounded-full` toggles/avatars/chips, `rounded-sm` status badges, clickable record/KPI cards (`rounded-lg`), decorative icon badges (no border = not a control), and the canvas floating control cards inside the two React Flow maps. When adding ANY new button/pill/input to a detail page, use `rounded` — not `rounded-md`/`rounded-lg`.
+- **Global toast colors (`theme.css`)**: `[data-sonner-toast][data-type='success']` green / `[data-type='error']` red — style toasts globally, don't restyle per call site. `theme.css` also restores `cursor:pointer` on buttons (Tailwind v4 preflight sets `default`).
+- **Tab hover treatment (product-wide)**: content tabs are `px-2 py-3 … border-b-2 transition-colors`, inactive hover = light-gray bg + `border-[#CBD5E1]` bottom border (no top radius), active = blue; tab containers use `gap-2.5`. ⚠️ `DrawerShortcuts`' content-tab cycling matches the ACTIVE tab by the blue border with a word boundary (`/(^|\s)border-\[#3D8BD0\]/`) since every tab now has `border-b-2`.
+- ⚠️ **Tooltip `text-balance` gotcha**: the shared `TooltipContent` (ui/tooltip.tsx) applies `text-balance`, so long multi-line tooltip text splits into equal short lines inside a wide `max-w` box (blank right half). Override per-tooltip with `text-wrap` in `className` — `cn` runs tailwind-merge, so it cleanly replaces the base class.
+- **Ticket detail V2 (INC-33 only)**: tabs = Conversation · **Incident Details** · Tasks · Approvals · Relations · Audit Trails · Resolution. **Incident Details tab (`IncidentDetailsTabV2.tsx`)**: sticky toolbar (`sticky top-[48px]`, Conversation-row recipe; root has NO `space-y` — the sticky gotcha) with two pills that are **SCROLL ANCHORS** (both sections render in ONE scroll; smooth-scroll + `scroll-mt-[112px]` + a scroll-spy that follows manual scrolling), a functional **field search** + panel-style **filter dropdown** (All/Empty/Filled/Required — actually filters by value, spans BOTH sections, per-section hide + one empty state). Section 1 "Ticket Fields" (16px title): the 7 quick fields **sharing drawer state with the right panel** (edits sync both ways) + moved fields (Category/Department/Source/Location/Vendor/Support Level) + full-width Tags chip editor (+Add tag focuses the input) + a SYSTEM FIELDS hairline section (2-col via `SystemFieldsRenderer twoColumn hidePin`; labels single-line 190px; stacks label-over-value under `@4xl` container query with `gap-y-4`). Section 2 "Additional Fields": built-ins + Description + the 50+ grouped custom fields (group separators `mt-8 pt-6`). **V2 right panel** (via `compactTicketFields`/`hideAdditionalFields`): ONLY Status/Priority/Assignee/Technician Group/Urgency/Impact/Tags — no View more/System Fields, no Additional Fields accordion (own storage key `ticketV2PropertiesSectionOrder`), no field search/filter row, no pin icons, no Customize Layout, no pin/search/filter hints card. V2 tab strip runs overflow detection for EVERY ticket (V1 gates it to INC-35) with badge-inclusive width estimates.
+- **Tab-strip overflow (all 14 drawers)**: `moreButtonWidth` is COMPUTED = widest `tabWidths` entry + 24 — the More button relabels to the selected overflow tab's name, so it must reserve the worst-case label (a fixed 80 re-overflowed the row after selection). Every strip container also carries **`overflow-x-clip`** (clip, NOT hidden/auto — y stays visible so the More dropdown escapes) so estimate drift can never cause horizontal scroll.
+- **Control height = 32px (`h-8`/`size-8`) in detail-page tabs**: all toolbar icon buttons, filter/action pills, and detail-tab grid searches (the old 36px `size-9`/`h-[36px]` family was swept). ⚠️ `AuditTrailsTabContent` styles its buttons via a **const string `iconBtn`**, not inline className — sweeps matching `className=` miss it. List-page toolbars + side-panel FORMS stay 36px (internally consistent forms); right-rail group icons are `size-8 rounded`.
+- **Pagination min-items rule (central)**: the shared `Pagination` returns `null` when `totalItems <= 10` (smallest page size ⇒ no possible second page) — applies everywhere it's used, incl. filtered-down grids; all patch tabs reset to page 1 on search/filter change so the hidden bar can't strand a stale page.
+- **Onboarding tour is TICKET-page-only**: the first-visit guide (`TicketDetailsOnboarding`, session key `hasSeenTicketDetailsOnboarding`) auto-opens ONLY in `TicketDrawer` + `TicketDrawerV2` — the auto-open `setTimeout` was replaced with a comment in the other 12 drawers. Only `TicketActionsMenu` ever rendered the manual "Restart Tour" item, so no menu edits were needed.
+
+- **Portal builder QA — the conformance harness (`audit/portal-conformance.js` + `audit/FINDINGS.md`):** the sweep that answers "does this control actually paint anything?" for every widget and section. Paste the file into the console with the builder open, then `await __audit.run()`; `__audit.report()` prints the defect list. It selects each node, opens every accordion, drives every control it can operate, and compares a computed-style+text signature of the node before and after. ⚠️ It NEVER presses a destructive button (`A.DANGER`) and it blocks link navigation — a sweep that drives every button will otherwise press Delete or follow an Action Card destination and reload the app mid-run, which happened twice before the guard existed. ⚠️ It SKIPS an option that is already selected: clicking the lit segment of a segmented control correctly changes nothing, and counting that as a dead control fills the report with false failures. ⚠️ Results persist to `sessionStorage` after every node so a crash still names the node that caused it. Known blind spots reported as `skipped`, never `ok`: colour pickers (need a popover), upload zones (need a file), and non-visual fields (a link destination changes no pixels). Baseline run 20 Aug 2026: 27 nodes, ~370 controls, ~60 inert — see FINDINGS.md for the four shared causes.
+- **Portal builder — layout & alignment model (`LAYOUT-ALIGNMENT-SPEC.md`):** measured from Duda's own DOM, not inferred. A section's Layout is **Presets** (the flex direction) + **Content alignment** (TWO icon rows, always both, always named by SCREEN direction). ⚠️ **The MAIN axis distributes, the CROSS axis aligns:** the axis the section lays out along gets 5 options (start/center/end/space-between/space-around); the other gets 4 (start/center/end/stretch). `space-*` can never appear on the cross axis, `stretch` never on the main axis. Defaults are main `flex-start`, cross `stretch` — plain flexbox, so the lit cross button must be *stretch*. ⚠️ The preset SET tracks the CELL COUNT, not the content: n=2 → `horizontal|vertical`; n=3 → `+2x1`; n=4 → `+2x2, 3x1`, where `AxB` means A items on the first row and B on the second. Empty sections get the identical panel — Duda never gates these on content, so a `hasContent` gate is wrong. We deliberately do NOT take Duda's "More options" (Items per row / Items Fit) — decided 20 Aug 2026; the consequence is that choosing any main-axis value other than the filling default must PACK the row, since cards carrying `flex: 1 1` leave no free space for `justify-content`.
+- **Portal builder — padding belongs to the PAINTED box (`paintsOwnSurface` in portalPageModel):** ⚠️ padding on a wrapper is grey space AROUND a card, not breathing room INSIDE it — and a dragged height on the wrapper CLIPS the card instead of growing it. Any element that draws its own white card (placed data widgets, collections, and the built-in `quick-*` action cards) has `Sel` WITHHOLD padding and height, and applies them itself as `minHeight`. ⚠️ The resting `p-4` class is KEPT: dropping it once any side is set collapsed the untouched sides to zero, so setting a left inset silently removed the card's top and bottom. An inline side beats the class on its own edge and leaves the other three resting. ⚠️ Exactly ONE element may apply a node's style — `Sel` — or it lands two or three times over; `AddedSection` used to spread `styleOf` on the section AND again on an inner div.
+- **Portal builder — `fillCss` is the one container-styling reader (`portalPageModel`):** the panel writes `fill`/`bg`/`bgImage`/`borderWidth`/`radius` into widget CONFIG; the built-in quick cards were reading `styleOf` (the STYLE store), so every one of those controls saved a value the canvas never looked at. One function, both renderers. ⚠️ Use `backgroundColor`, never the `background` shorthand — the shorthand resets backgroundImage/Size/Position, so the image fill and the colour fill fight depending on render order. ⚠️ It omits UNSET keys entirely: spread over a base object, an explicit `undefined` DELETES what the base set, which is how a card with fill `none` lost its own default white background (the tell is a lone `border-image: none` in the inline style).
+- **Portal builder — child text nodes:** `nodeById` describes any `<id>-title|sub|label|viewall` (plus `cl<n>`/`cv<n>` for Contact Us line label/value) as a text node, and `ownerOf` strips the suffix so the value reads and writes on the WIDGET's config. Wrapping a heading in `<Sel id={`${nodeId}-title`}>` is all that is needed to make it inline-editable. ⚠️ The suffix IS the node identity — two children claiming `-sub` are one node, so a Title element's eyebrow takes `-label` and its subtitle takes `-sub`. ⚠️ The child spec edits the key its suffix names, so a widget whose second line was keyed `prompt` opened a BLANK drawer while the canvas showed text; Feedback is keyed `sub` and merely LABELLED "Prompt".
+- **Portal builder — hidden catalogue elements:** `PortalElement.hidden` withholds an element from the palette without deleting it, so its spec and renderer stay and anything already on a page keeps working. ⚠️ Filter BEFORE the search, or a hidden row is still reachable by typing its name; and filter the builder's seed too. Currently hidden: **Spacer** and **Advanced Tabs**. ⚠️ **Media Slider is NOT hidden any more** — `v-slider` carries no `hidden` flag and is addable from the palette; it was parked in Aug 2026 with 22 of 33 controls inert, and its panel was repaired in Sep 2026 (see the Media Slider bullet).
+- **Support Portal — the live-data cards and the Quick Actions row are the PRODUCTs, not the admins (PMG batch, 24 Aug 2026):** fourteen changes that pull configuration back out of the builder wherever the backend already owns the answer. ⚠️ **The six live-data widgets have NO content panel** — My Open Requests, Pending Approvals, Most Read, My Assets, My CIs, Announcements each carry `fields: []` and `LIVE_CARD_PACKS` (= `LIST_CARD_PACKS` minus P8), so their panel is DESIGN → Style, Spacing. Their **`defaults` are untouched and still drive the renderer**, so every card is pixel-identical — the values simply stopped being editable, and restoring a control is one line in `fields`. P8 went because what a live card does when its query is empty is the products answer; My CIs still renders No Data Found from its defaults. ⚠️ **Contact Us keeps two fields** (email value, phone value): the labels are the products words, and the whole Hours line went with its toggle because a line you can blank but never hide is worse than a fixed one. ⚠️ **`LOCKED_ROWS` in `portalPageModel`** — Quick Actions takes nothing but its four cards. Gated inside `dropInRow`, the single funnel every route ends at (drag, click-to-add, replace-a-built-in); a DRAG is refused by not accepting the dragover so the cursor reads no-drop, while click-to-add falls THROUGH to a new section because you clicked a row and something has to appear. ⚠️ **The four action cards are `hidden` from the palette and out of `CLONE_TYPE`**, which is what greys the toolbars copy button for them — the bar is shared, so a button that vanished for one kind would read as a broken toolbar. Their **ACTION section is withheld** too (destination is backend-side, keyed to card identity); the custom Action Card keeps its own, because it exists to point anywhere. ⚠️ **Card templates moved from the section to each card** — a row can now hold four shapes; the sections `cardTemplate` default remains as the renderers fallback so an untouched row stays uniform. ⚠️ **The count badge sits beside its title**, not by View all: the title lost `flex-1` and title+count became one group, or the badge gets pushed back to the far edge. ⚠️ **There is no `requests-list` node** — the rows inside My Open Requests were a second place to configure one widget, reachable only by clicking the rows. ⚠️ **The empty-CONTENT gate has to be written TWICE** — `hasContentSection` in `PanelBody` and `hasPacksContent` in the packs model; neither may test `!!collectionSlot`, which is a JSX fragment and always truthy. Progress is tracked in [tasks.md](tasks.md), published live at `/tasks/` by `scripts/build-tasks.mjs`.
+
+- **Support Portal — the SECTION TREE (containers all the way down; `SECTION-TREE-SPEC.md`):** an added section is no longer `rows: number[][]` + one element per column. It is a recursive tree of ONE node type — a **Box** (`portalPageModel.ts`): `{ id, dir: 'row' | 'column', weight, children?, el? }`, a branch or a leaf, never both. A section, a column, a row and the cell a widget sits in are the same thing in four positions, which is what makes the handwritten note's *"all level feasibility in row, col. split"* a property of the model rather than four features kept in step. ⚠️ **`dir` IS `flex-direction`, and it IS the note's "behaviour"**: a `row` lays its children left-to-right so each reads as a Column and **Split adds a column**; a `column` stacks them so each reads as a Row and **Split adds a row**. ⚠️ **Flipping behaviour is non-destructive by construction** — children and order untouched, only the axis changes — which is what makes *"sub section as column, but I can rearrange to top & bottom"* one click. ⚠️ **A box is NAMED by its PARENT's `dir`** (child of a row = "Column"), derived in `nodeById` and never stored, so a flip renames its children and the breadcrumb cannot go stale. ⚠️ **Split preserves content**: a leaf becomes a branch of two with the element moved into the first. Defaults: a new section's root is `row`; every leaf is `column`, which is exactly why *"in a sub section, widgets always add row-wise"* is the leaf default rather than a special case. **Limits** (settled 25 Aug 2026): depth **4 below the section**, **4 columns to a row** (stacked rows uncapped — a tall column costs nothing, a wide row costs readability), no mobile breakpoints. At a limit **Split stays visible and disabled with the reason on it** (`splitBlockedBecause` returns a REASON, not a boolean). ⚠️ **Ids are MINTED (`sec-3-b7`), never positional.** The old `-c0` numbering ran across every row, so an insert renamed every column after it and `addColumn` had to re-key `items` — the comment that used to sit there records Duplicate writing a clone over its neighbour because of it. In a tree that is far worse: `widgetCfg`, `styles`, `placedText` and `icons` are all keyed by node id, so a split near the top would silently renumber a subtree and every stored value would land on the wrong box. ⚠️ `nodeById` therefore reads a **registry, not a regex** — `registerTree` walks each section beside the `sectionsRef` assignment in the builder and calls `registerBox`; **the ROOT is deliberately not registered** (its id is the section id, which `nodeById` already answers with 'Section'). ⚠️ **Behaviour is the ONE panel property that does not live in widget config** — `cfgFor` reads `dir` off the tree LAST (so nothing can answer over it) and `patchCfg` writes it into the tree and strips it from what it stores; that write is **inlined** rather than calling `setNodeDir`, which is declared 200 lines below it. Bridge helpers keep the Layout PRESETS working on `rows`-shaped data (`sectionRows`/`sectionRebuild`/`sectionElements`/`boxOfElement`) — ⚠️ applying a preset FLATTENS nesting below the top two levels, which is what "a preset is not a picture of a layout, it IS the layout" has always meant. `removeBox` **collapses a branch left holding one child** into that child. `moveNode` now reorders a box among its siblings — it never could before, because there were no siblings. `ColumnAdders` takes the parent's `dir` and reads "Add a row above/below" or "Add a column to the left/right"; **no parent (a section root) means no side adders at all** — the way to give a root a neighbour is Split. Scope: **added sections only**; the built-in bands are unchanged and `LOCKED_ROWS` still fences Quick Actions.
+
+- **Support Portal — the TABLE element (`portalTableModel.ts` + `PortalTable.tsx`; `TABLE-ELEMENT-PROMPT.md`):** the old static grid filled in from a side panel is gone; the Table is now a spreadsheet-grade editor on the canvas. **`portalTableModel.ts`** is the data model plus the Tiptap-named command API (`insertTable`/`addRowBefore`/`deleteColumn`/`duplicateRow`/`moveColumn`/`reorderRow`/`resizeColumn`/`fitTableToWidth`/…), every one a pure function so an operation is one undo step and can be reasoned about without the DOM. **`PortalTable.tsx`** is the canvas: the 10×10 insert picker, the row/column handle rails, drag-to-reorder with a live drop indicator, the handle menus, boundary resize, the `+` extend buttons, rectangular cell selection and the floating cell toolbar. ⚠️ **THE HANDLES ARE AN ABSOLUTELY-POSITIONED OVERLAY over a MEASURED geometry, never table children** — a `<div>` between `<table>`/`<tbody>`/`<tr>` takes the row out of the table box model and every row becomes its own anonymous table (the same trap as the `Sel`-never-wraps-a-`<tr>` note). Geometry is read off the RENDERED cells via `ResizeObserver`, not computed from `colWidths` — a percentage of a container that has not laid out yet is zero. ⚠️ **10 is a HARD ceiling on rows AND columns**, not just the picker (the task says 10×10; the brief's 8×8 loses), and every limit helper returns a **REASON, not a boolean**, so a menu item that cannot apply stays visible and disabled with the reason on it. ⚠️ **`colspan`/`rowspan` are in the model from day one and every op is written span-aware**, though nothing produces a value above 1 yet — merge/split, sort and Excel paste are pass 2. ⚠️ **ONE source for everything the panel and the canvas both touch**: headers live in CONFIG (`headerRow`/`firstColumn`), written by the panel switch AND the handle menu, applied to the model by `withHeaders` on every `tableFrom` read — there is deliberately no `toggleHeaderRow`/`toggleHeaderColumn` on the model, because a third writer would win whenever it was called; and the panel's sheet editor now reads `gridOf` and writes `applyGrid` against the SAME `cfg.table` the canvas owns (it used to own a parallel `cfg.rows`, so once a table had been touched on the canvas every sheet edit was stored and silently ignored). Cell padding is the panel slider and the bottom-edge drag writing one `cellPad` key. `tableFrom` reads three config shapes (the model, the sheet's `{id,cells}` rows, and bare `string[][]`) so no migration was needed. ⚠️ **React trap worth remembering:** switching a cell between `<td>` and `<th>` keeps the same component instance, so a mirror effect with only `[content, editing]` deps never re-runs — but the element TYPE changed, so React tears down the DOM and builds an empty one. Turning on the header column blanked every cell in it, silently, with the model still holding the text. `tag` is a dependency of that effect for exactly this reason.
+
+- **Support Portal — the palette's "already added" mark (`SupportPortalAddPanel` + `placedPredefined` in `SupportPortalBuilder`):** a **predefined** widget renders greyed with a green tick while the page is carrying it; everything else stays addable any number of times. ⚠️ **Predefined is a GROUP rule** — **Data** or **Actions**, plus any element carrying an explicit `PortalElement.node` (which is what keeps Favourite Services and Most Used Services marked from the Custom group). Gating on `node` alone was too narrow and shipped a visible bug: **Announcements** is Data with no fixed page block — it only ever exists as a placed element — so it could never be marked while its five group-mates all were. ⚠️ The mark is **DERIVED per render from live page state**, never from the catalogue's `onPage` flag: `onPage` is a fact about the product and never changes, and a greyed row has to track the page to be truthful. **Three homes are counted** — `rowOrder` minus `removed`, `blockOrder` minus `removed` (Favourite/Most Used are top-level BANDS, not row members), `content.quick`, and the placed-element TYPES in every section plus `rowExtras` — because adding one back lands a placed instance rather than restoring the fixed block, and counting only the block would let you stack copies while the row still read addable. ⚠️ **The panel must not re-test the rule**: it had its own `e.node` copy and the narrower one won. The builder decides, the panel reads `placed`. A drag is refused by `draggable={!added}`; a drop that reaches `addElement` anyway is refused there with the reason, since that is the one funnel both routes pass through. ⚠️ Related: `card()` in the preview used to search the LIVE `rowOrder` for a card's row and then test whether that row contained it — a condition that can never be true — so a deleted live-data card rendered anyway at order 0. Membership comes from `rowOf`, the static map.
+
+- **⚠️ Support Portal — `structureSpecId` matches on id SHAPE, so it changes when a shape changes.** Task 23 renamed section boxes from the positional `sec-3-c0` to the minted `sec-3-b7`; `structureSpecId` was left testing `-c\d+`, so every column and every unsplit section stopped resolving to `COLUMN_SPEC` and fell through to the legacy `PortalElementPanel` — visible as one element showing an old Style block (a "Background colour" dropdown, a "Per corner" radius, a `solid` border row) while every other element showed the current Fill/Border/Corner-radius one. Nothing errors; the wrong panel simply renders. The other shape-matched routes in that function (`-caption`, `-title`, `-sub`, `-viewall`, `-icon`, `sec-N`) have the same exposure.
+- **Support Portal — adding a collection item opens it IN PLACE.** `addItem` used to call `onSelect`, which swapped the whole sidebar for that item's drawer — you ask for one more row and the panel you were working in disappears. It now only redirects when the collection has **no** inline editor (`col.noOpen || fields.length < 2`), because that is the only case with nowhere else to go; otherwise `PortalItemList`'s Add button expands the new row itself (the item is always appended, so its index is the length before the add). ⚠️ **`CollectionSpec.blankOnAdd` and `WidgetField.placeholder` are OPT-IN** — set on the Accordion. The seeds exist so an untouched page shows a realistic widget, and a gallery slide added blank is a broken slide; but a question you just chose to add should wait for YOUR question rather than carry an example you have to select and delete.
+
+- **Support Portal — the per-item ARROW is gone wherever a row can be edited in place.** `inlineCoversAll` used to mean "the inline editor happens to cover every field"; it now means "the row HAS an inline editor" (`!col.noOpen && col.fields.length >= 2`). The arrow opened the item's own drawer, which replaced the whole panel you were working in — the same swap `addItem`'s `onSelect` used to cause, reached by a different button. What the inline editor does not cover is reachable another way: the `inlineCta` at its foot and the item's own text nodes on the canvas. ⚠️ A collection with **no** inline editor keeps its arrow — it is the only way into those items, and removing it would strand them. ⚠️ **Consequence:** the inline editor is now the ONLY surface for an item, so its two labels and its hide-tooltip come from the collection's own fields (`inlineLabels`) rather than the hard-coded "Title"/"Description" — a FAQ calls them Question and Answer, and would otherwise have had no surface anywhere using its own words.
+- **Support Portal — FAQ and Accordion are deliberately the same widget now (25 Aug 2026).** FAQ's `fields` is a Title and nothing else: the Behaviour group (show-first-open, allow-multi-open), the per-item "Open by default" override and the whole Accordion style group (item container, divider, chevron position and rotation, question padding, answer indent, open-item background, expand animation) are gone, leaving Design as **Style + Spacing** — the Accordion's panel exactly. `FaqRender` opens **nothing on arrival and one answer at a time**, matching `AccordionRender`. ⚠️ Every removed value stays in `defaults` and is still READ by the renderer, so the card looks unchanged; deleting them would restyle every existing FAQ. `openByDefault` is still honoured on an item that already carries it. ⚠️ This re-creates the near-duplicate an earlier pass split apart ("one widget with two palette names edited two different ways") — the difference is that they are now edited the SAME way, and the user chose to keep both rows pending a later decision.
+
+- **Support Portal — the Quick Actions row's ONE addable card (`act_link` / `quick-link`):** the row is `LOCKED_ROWS`-fenced against everything the palette can offer, by drag and by click, and gains exactly one card offered from its OWN panel — a locked row and a row with one door are different things. `SECTION_SPEC` grows a Content field gated on `__quickRow`, a flag `cfgFor` seeds for that one node (a spec is data and cannot look at the page); `__hasLink` is what disables the CTA with a reason rather than letting a second card land in a row sized for one. ⚠️ `addLinkCard` appends a REAL card to `content.quick` and widens the row (`cols`), because a placed element standing in for a card would not share the renderer, the templates or the row's share of the width — and a fifth card in a four-column row wraps to a full-width row of its own, which is a different block that happens to look like a card. ⚠️ **`act_link` is built from the same factory as the four fixed cards**, differing only in a fixed destination (URL + new-tab, no dropdown). ⚠️ **Title is withheld from the four fixed cards' panels** (`id === 'act_custom' || id === 'act_link'` gate) for the same reason their title has no `Sel` on the canvas: they are the product's destinations. Subtitle and Icon stay on all five. ⚠️ **A card that is not in `PORTAL_NODES` still RENDERS** — `Sel` falls back to a plain div — so it is visible, unselectable, unnameable and opens a blank panel: "I added a card and nothing happened", with the card in plain sight. `quick-link` is declared for the same reason `quick-ad` is.
+
+- **Support Portal — the two-step create dialog (`CreateSupportPortalModal`):** step 2 is ONE screen. The old fork (two big cards, "Create from scratch" / "Use Template") asked you to choose a KIND of start before you could see any of the starts; from-scratch is one row and the templates are six tiles, so they fit together. ⚠️ **From-scratch is an immediate action**, like a template tile — no selected state, no Create button, so every starting point is one click; the "start from a blank page instead" footer link went with the fork it existed to escape. ⚠️ **The Default is the grid's FIRST TILE, badged, in every category** — it has no category of its own, being the portal that already exists rather than an IT or HR layout. ⚠️ **`saveDetails` UPDATES once a draft exists.** Step 1 stays reachable from step 2, and it used to call `create` every time — going back to fix a typo and pressing Save left TWO portals, one with the typo and one with the correction, with nothing on screen saying so. The button relabels to "Save changes" so it never reads as one thing and does another. ⚠️ The stepper is a grey band with a chevron, finished step greyed with a **#3D8BD0** tick and current step dark with its number: green is this product's healthy/success colour and a completed step is neither.
+
+- **⚠️ Support Portal Table — the drag, and why "verified" was wrong the first time.** The column/row reorder was reported working after a test built from SYNTHETIC events (`dispatchEvent(new MouseEvent(...))`), which fires the handler without a real pointer — a genuine press-and-drag did not work. Real drags need **Playwright** (`mouse.down/move/up`); Chrome DevTools cannot produce one. Three separate faults: **(1)** no movement threshold, so every press started a drag and a plain click opened the menu on release having reordered nothing — there is now a 4px threshold, which is what lets one control be a grip AND a menu button; **(2)** `geo` was read from the CLOSURE, a snapshot taken at mousedown, while the table reflows the moment a row is lifted — it reads `geoRef` now; **(3)** the floating cell toolbar was absolutely positioned over the column rail, so with any top-row cell selected the rail's handles could not be clicked at all (Playwright names this precisely: "subtree intercepts pointer events"). ⚠️ A one-shot **capture-phase click swallow** after a drag stops it opening the menu it used as a handle. ⚠️ The drag ghost is `position: fixed` in VIEWPORT coordinates — positioned against the wrapper it lags the cursor as soon as the canvas scrolls. Handles are `GripHorizontal`/`GripVertical` pills with a grab cursor: a chevron says "this opens something" and says nothing about picking it up. The floating toolbar is gone, replaced by a cell menu on a grip at the selection's right edge — it duplicated the handle menus and was physically in the way. `sortByColumn` never moves the header and sends blanks last in BOTH directions.
+
+- **Support Portal Table — merge is ACROSS A ROW only, and merging down is refused with the reason on the control.** `mergeCells` sets a `colspan` and **JOINS** the cells' content (keeping only the leftmost is a silent deletion); `splitCell` puts it all back in the first of the new cells, because there is no honest way to decide which words belonged to which column. ⚠️ `mergeBlockedBecause` refuses a vertical selection deliberately: a `rowspan` means the rows beneath no longer tile their own width, so `fixTable`, `cellAt`, `cellStarts`, `columnCount`, insert/delete column and both reorders each need a coverage map first — the brief calls this the hardest requirement in the document and permits a reasoned refusal. `rowspan` stays in the model and the renderer still emits it, so writing that map later changes nothing else. Merge and Split share ONE menu slot, showing whichever applies.
+- **Support Portal — the Default template tile draws THIS portal** (`TemplateArt` layout `portal`). It used to borrow `classic`, a generic wireframe shared with a real template, so the one tile promising "the page your requesters see today" showed a page nobody has and looked like every other tile. The `portal` art mirrors what the page renders: banner + search, the four action cards overlapping its lower edge, a service tile row, then the work cards.
+
+- **⚠️ Support Portal Table — `overflow-x-visible` beside `overflow-y-auto` DOES NOTHING.** CSS forbids one axis being `visible` while the other scrolls, so the x axis computes to `auto` too — which silently clipped the column menu's Colour and Alignment flyouts at the menu's edge and made both rows look like disabled items. They are portalled to `document.body` and positioned from the trigger's rect, flipped left when the right would overflow the window. The same trap is already documented for the drawer tab-strip and the listing kebab; this is the third time it has bitten. Related: the row/column grips are **six dots, hidden until the pointer is over the table** (permanently-visible grips put two grey bars around every table on the canvas), mid-grey on hover and accent-filled when selected or dragged; and the 10×10 picker is a **contiguous** grid opened from a "Select row / column cells" panel field, where picking **resizes** rather than rebuilding so a filled table is never emptied.
+
+- **Support Portal — the Record List widget (`RECORD_MODULES` in `supportPortalData.ts`, `record_list` spec, `RecordListRender`):** the six live-data cards with the question left open — same card, same rows, same empty state, but the admin picks the module and the statuses. ⚠️ It has a CONTENT panel where the six fixed cards have none, and that is not a contradiction: those lost theirs because the backend owns what "My Open Requests" means, while here the admin owns it, so the panel is the only place the widget can learn what it is for (its title is authored for the same reason). ⚠️ It sits in **Custom, not Data**, and that does real work — Data and Actions are group-gated as predefined (one instance, ticked once placed) while Custom is repeatable, which is what two differently-filtered lists need. ⚠️ **Statuses are declared per module** (a request is Open, a change is Draft, a patch is Missing) and changing the module CLEARS them via `consequence`, with a toast — a list holding the previous module's words matches nothing and the card empties for a reason nobody can see. ⚠️ **An empty status list means EVERY status**, not none. ⚠️ The filter **runs on the canvas** over the module's dummy rows, so narrowing empties the card here exactly as on the portal — a card that ignored its own filters while being configured teaches the admin the controls do nothing. Adding a module is one row in `RECORD_MODULES`; nothing else knows the set.
+
+- **Support Portal — "Action Counter" template (`tpl-counter`, `layout: 'counter'`), the first template built from an external Claude Design reference (`ServiceOps portal layout system (2)/Support Portal Layout System.dc.html`, artboard `#3c` "Counter"):** built as SEED DATA over the existing renderer plus a handful of small, GENERAL, additive renderer fixes the seed exposed a real need for — none of them change any existing template's behaviour (verified by re-checking Verdant, the other `cardTemplate:'top'` user, after each one). The reference's manufacturing-mockup copy, its QR "scan an asset tag" affordance and its 5th ("Track a Request") tile were all dropped on request — no invented copy or destinations; its per-row Approve/Reject buttons needed no new work, the shared Approvals card already renders them.
+  - **Two NEW page-level "Template LOOK" flags, both off by default and set only here**: `page.quickLook: 'glass'` (a third value beside `'row'`/`'tile'`) and `hero.searchPlacement: 'side'` (a third value beside `'in-banner'`/`'floating'`). Both follow the file's existing convention of adding a value to a shared key rather than a template-only branch.
+  - **`quickLook: 'glass'`** is what makes the banner "keep going": FLAT `bannerStyle` on the hero plus the SAME flat colour on `cfg.quick.{fill:'color', bg}`, so hero and quick paint identically. It drops the hero-overlap climb and tightens the hero's own bottom padding (both previously bundled into `tileActions`/`quickLook:'tile'` — `glass` needed the same geometry WITHOUT `tile`'s forced centring or its hover arrow, so it is gated by its own `quickOnBanner` boolean, `(tileActions || quickOnBanner)` at each of the two call sites). ⚠️ It sets NO hover arrow anywhere and NO forced text-centring — those stay `tileActions`-only, untouched by this template.
+  - ⚠️ **`quick` is a genuine DOM descendant of `hero` when `quickOnBanner`, not a colour-matched sibling underneath it** — this took two attempts. The first pass left them as siblings with identical backgrounds, which (a) at some zoom/DPI combinations showed a real hairline seam from sub-pixel rounding between two independently-painted same-colour boxes (fixed with a defensive `marginTop: -1` overlap on `quick`, kept as belt-and-braces even after the real fix below), and (b) — the actual complaint — still let the canvas hover/select "Hero" as its own bounded region distinct from the tiles, which reads as two bands however well the colours line up. The real fix: `quickSection` (the entire `<Sel id="quick">…</Sel>` tree, tiles and all) is built ONCE as a `const` right before this component's `return`, then placed in exactly one of two spots — `{quickOnBanner && quickSection}` as the LAST child inside the hero band's own coloured div, or `{!quickOnBanner && quickSection}` in quick's normal sibling position below hero — the same "one card, two possible homes" pattern `requestsCard`/`approvalsCard` already use for the work-rail. Verified with `document.querySelector('[data-node="quick"]')` actually being a DOM descendant of `[data-node="hero"]` when `quickOnBanner`, not just visually adjacent. Hero's own `minHeight` was sized for text+search only; it needs no separate bump — flexbox content naturally grows the band past its floor once the tiles render inside it, which is the actual mechanism behind "the banner gets bigger to fit the actions."
+  - **Card treatment, 4 tiles not 5**: Report an Incident is the only opaque (white) tile, on the DEFAULT `cardTemplate` ('left' — icon-left row, unchanged). The other three (Request Service/AD Self Service/Knowledge) use a NEW `cardTemplate: 'stackedLeft'` — icon top, text below, BOTH left-aligned, `fill:'color'` at `rgba(255,255,255,0.14)`/`0.22` border, `sub: ''` (an explicit empty string, not an omitted key — the render now skips the `-sub` line entirely when the resolved value is `''`, which no other template ever produces) and `styles[id].iconFill:'transparent'` (bare glyph, no icon badge). ⚠️ **`stackedLeft` is deliberately NOT a `top` variant** — `top` was left byte-for-byte untouched (still always centres, per its own long-standing comment) precisely so Verdant's tiles could not be affected; `stackedLeft` is its own branch (`flex-col justify-between`, no `centre`) that only a card explicitly requesting it will ever hit.
+  - ⚠️ **Title/subtitle colour is NOT a flat `styles[id].color`** — `roleStyle` resolves it through `NodeStyle.type[role].color` (nested, keyed by the text node's own id `${cardId}-title`/`${cardId}-sub` and role `'title'`/`'body'`), so the seed sets `styles['quick-service-title'] = { type: { title: { color: '#FFFFFF' } } }`. `iconColor`/`iconFill` ARE flat, keyed by the card's own id — a different mechanism (`chosen()`/`resolve()` vs `roleStyle()`/`resolveType()`) for a different-looking value is an easy mix-up.
+  - **`searchPlacement: 'side'`** pairs the heading block with the search box on one row (`items-end`, mirroring the reference) instead of stacking the search below the subtitle — a wholly separate JSX branch alongside the existing stacked layout, never taken unless a hero explicitly asks for it, so no other hero is touched. Copy is the product's OWN default hero text (no `heading`/`sub`/`searchPlaceholder` override in the seed at all — it falls through to `content.hero.title`/`.subtitle`/`.placeholder`, i.e. "Welcome to Support Portal" etc.), used in the reference's POSITION rather than the reference's manufacturing words.
+  - **Approvals and Assets move into the WORK-RAIL** (`rail: ['approvals', 'assets']`), a placement no template had used before (the rail previously only ever held `knowledge`/`news`/`contact`, all three homed to the `work` row). This needed two small, general fixes in `SupportPortalPreview.tsx`: (1) `railCard()` grew an `'assets'` branch rendering `RecordsCard` (the compact list, not `RecordTiles` — that tile grid is built for a WIDE row, not a narrow rail column); (2) the hardcoded work-main render (`{requestsCard}{approvalsCard}` + the assets tile row) now checks `!rail.includes('approvals')` / `!rail.includes('assets')` before rendering each, so a card claimed by the rail never renders twice. `'work-main': { cols: '1' }` lets Requests take the whole main region since Approvals no longer shares it.
+  - ⚠️ **A card's CSS `order` comes from its own home row's index** (`rowOf(id)` → `rowOrder[home].indexOf(id)`) — `approvals` (home `work`, index 1) and `assets` (home `records`, index 0) collided as raw `order` values and rendered Assets above Approvals regardless of `rail`'s own array order, the exact "an order is only meaningful within ONE list" trap the work-main region's own comment already names. Fixed by wrapping each rail member in a `<div style={{ order: rail.indexOf(id) }}>`, not a bare `Fragment` — the wrapping DIV becomes the actual flex child, so its order overrides whatever the nested card computed for itself. Any future template mixing rail members from different home rows needs the same wrapper.
+  - `TemplateArt` gained a `layout === 'counter'` sketch (banner block with 5 embedded tiles, one opaque + four faint, then a wide-plus-narrow-stacked work row) — the first gallery thumbnail to depict tiles riding INSIDE the banner rather than on its lower edge; the live page itself ships 4.
+  - ⚠️ **`quick-link` (the row's one admin-owned, addable action card) was tried for a 5th tile and explicitly REMOVED** on request (invented copy, "IT Status Page", naming nothing real) — the page now uses only the 4 product-fixed destinations. The infrastructure added to support it is HARMLESS and left in place for a future template that might want it: `quick-link` has no entry in `DEFAULT_CONTENT.quick` by design (see `LINK_CARD_ID`), a `TemplateSeed` cannot add one (the interface has no `content` field), and `SupportPortalBuilder`'s `content` `useState` initializer will backfill the same placeholder `addLinkCard()` itself would whenever a FUTURE seed's `rowOrder.quick` includes `LINK_CARD_ID` — do NOT instead add `quick-link` to `DEFAULT_CONTENT.quick` globally, which would make `__hasLink` true everywhere and permanently disable the "Add external link card" affordance on every portal.
+
+- **Template LOOKS — how a template changes SHAPE without a second renderer (`SupportPortalPreview`).**
+  The subsystem's rule is stated in `supportPortalData.ts`: *"Seeds, not a second renderer"* — a layout
+  with its own rendering path is a second page to maintain, and the two drift the first time a widget
+  changes. So a template that needs a different SHAPE adds a **page-level look key** that the shared
+  renderers read, exactly as `cardLook: 'spine'` already did. Read next to `cardLook`:
+  `heroInk` ('light' | 'dark' — a pale banner with the default white heading is an invisible heading,
+  so this travels with any light `bannerColor`) · `heroArt` ('auto' | 'shapes', see `HeroShapes`) ·
+  `quickLook` ('row' | 'tile' — centred tiles, and it also drops the 62px climb so the cards stop
+  straddling the banner) · `servicesLook` ('plain' | 'panel') · `railHome` ('work' | 'services') ·
+  `workLook` ('cards' | 'tabs') · `helpLook` ('plain' | 'dark').
+  ⚠️ Each is INDEPENDENTLY useful and they are deliberately not bundled behind one `skin` key — bundling
+  is a template's job (its seed sets them together), not a config's.
+  ⚠️ `railHome: 'services'` moves WHERE the rail draws, never what is in it — membership is still the
+  `rail` array. `workRail = rail && !railInServices` is the narrower question the work band must ask;
+  testing `rail` alone left it drawing an empty second column and squeezing its cards into a third of
+  the width.
+  ⚠️ `workLook: 'tabs'` mounts the REAL card in each panel (with `CardShell hideHead` and `card()`'s new
+  `bare` option), so all three keep their node id, selection, widget drawer and removal. It exists and
+  works but is OFF in every shipped seed — three lists behind one strip means two are never seen.
+- **`TemplateSeed` reaches BOTH stores.** It had `cfg` and no `styles`, and some of what a template
+  arranges lives in the style store rather than in config — `columns` above all, which §7.8 puts there
+  because the Content tab and the Arrangement pack are two controls for one value. A template setting
+  `columns` in `cfg` was writing to a key the renderer does not read. `TemplateSeed.styles` closes it
+  and `SupportPortalBuilder` seeds `useState<PortalStyles>` from it exactly as it does `widgetCfg`.
+- **A templated page seeds NO example sections.** The builder lays out one demo section per palette
+  element under `records`; that was suppressed for `start === 'blank'` but not for a template. The
+  argument is identical — the examples exist so an *untouched* page shows what the palette can do, and
+  a page built from a template is not untouched. Gated on `seed`, so it covers every seeded template.
+- **Withheld, never deleted — and the RESOLUTION path stays whole.** Three lists now follow this:
+  `PORTAL_TEMPLATES`/`VISIBLE_TEMPLATES()`, `RECORD_MODULES`/`VISIBLE_RECORD_MODULES()`, and
+  `presetsFor`/`visiblePresetsFor`. ⚠️ The pattern is always the same and the reason is always the same:
+  the full list is what `recordModule()` and `presetById()` resolve a SAVED value through, so hiding an
+  option must never change what an existing card is showing. Narrowing the resolver instead of adding a
+  second function would turn a card saved against a hidden preset into a card with no filter at all.
+  ⚠️ And a hidden option must not stay as a DEFAULT — `record_list` seeded `filter: 'all-open'`, which
+  the trim withheld, so a new card landed on a preset it could not show and fell back to "No filter".
+- **Service Counter (`tpl-deskrail`) — the STICKY rail, and three more Template LOOKs.** The right
+  column is four rows of two EQUAL halves — Most Read | Announcements · Requests | Approvals ·
+  Favourite | Most Used · Assets | CIs — read as: what there is to read, what is on you, what you
+  can ask for, what you own. Reading leads because an announcement is the one thing on the page
+  addressed to everybody and time-bound; a P1 outage notice under two rows of personal worklists is
+  a notice nobody reads. New keys, all read next to `cardLook`:
+  `railHome: 'above'` (the rail pair takes the TOP row instead of the bottom — a new VALUE, since
+  Counter ships `'below'` and must not move; equal shares when it leads, 2:1 when it trails, because
+  a leading row sets the page's column rhythm and a trailing one is a footer) and
+  `heroSticky: true` (rail only).
+  ⚠️ **The sticky rail's height is MEASURED, not `100vh`.** In the published portal the page scrolls
+  in the window and 100vh is right; in the builder the page is a card inside a scrolling pane ~100px
+  down, so a viewport-tall rail hangs its last ~100px — Contact Us — below the fold, which is exactly
+  what pinning it to the rail's foot was for. It walks up to the nearest scrolling ancestor and takes
+  `clientHeight` less that pane's own padding. ⚠️ `self-start` is what makes sticky work AT ALL here:
+  the row is `items-stretch`, so the rail was already as tall as everything beside it and a sticky
+  element with nowhere to travel never moves. ⚠️ `top: 0` needs no measuring — Chrome anchors sticky
+  to the scrollport's CONTENT box, so a `top` equal to the pane's padding lands the rail one padding
+  lower than the page card beside it (measured: stuck at 144 where the card's edge is at 124).
+  ⚠️ **The measurement must NOT start from `querySelector('[data-node="hero"]')`.** `Sel` renders
+  `data-node` only while the canvas is EDITABLE — it is absent in Preview and on the published
+  portal, the two places the layout most has to be right — so the lookup found nothing there and the
+  rail silently fell back to its content height, ending 60px short of the fold while looking correct
+  in the builder. It uses a `ref` on the rail's own row, a plain div this file owns.
+  ⚠️ In a 380px RAIL the hero's text block takes `px-5`, and that is the SAME inset as everything
+  else, not a smaller one: every line in it sits inside a `Sel` carrying `px-1`, so `px-6` prints
+  text at 28px while the action cards and Contact Us sit at the section's 24px. Four pixels is
+  invisible across a full-width banner and plainly wrong down the side of a column.
+  ⚠️ **`cardHead: 'icon'` is all-or-none, so it had to reach the two cards that do not use**
+  **`CardShell`.** Announcements paints its own heading through `WidgetTitle` (which gained an
+  `icon` prop) and My Assets/My CIs pass `headIcon` alongside their existing `icon` — the latter is
+  the glyph on every ROW, a different question from the card's head badge, so conflating them would
+  mean a page wanting head badges could not have rows without them.
+  ⚠️ Services are CARDS here, not chips (`servicesLook: 'plain'` + `browseLook: 'split'` +
+  `styles.favourites/services = { columns: 2 }`): chips do wrap and never leave a hole, but they
+  read as filters, and at four services in two columns a card has room for its icon and its category
+  again — which is what a chip had to drop to stay a chip. ⚠️ `columns` lives in the STYLE store per
+  §7.8, so a seed writing it into `cfg` sets a key nothing reads.
+- **Custom Data Widget (`record_list`)** — Title · Module · Filter, matched to the reference build:
+  six modules (Requests · Changes · Assets · Configuration Items · Approvals · Knowledge) and the
+  requester-scoped presets only, each list bookended by `No filter — every record` and `Custom filter`.
+  ⚠️ `My Overdue Requests` had to be a NEW requester-scoped preset: the existing one is scoped
+  "Assigned to me", the technician reading of the same two words, and a requester portal offering it
+  would answer "my overdue" with somebody else's queue.
+  ⚠️ `ServiceTiles` ignored the `cols` its caller resolved and counted its own items instead, so the
+  Columns control wrote a value nothing read — both the Content tab and the Arrangement pack moved,
+  stored, and changed nothing on the canvas. It takes `cols` as a prop now.
+
+- **The portal template showcase (`PortalTemplateShowcase.tsx`, route `#/portal-templates`) was
+  REMOVED on 8 Sep 2026** — the file, its `Page` union member, its `PAGES` slug and its
+  `PAGE_TITLES` label are all gone, and a cold load of `#/portal-templates` now canonicalises to
+  `#/request`. Don't recreate it from an old link. The Use-Template gallery
+  (`SupportPortalTemplateGallery`) and the `PORTAL_TEMPLATES` data were deliberately KEPT. Two
+  lessons from it still apply to anything that renders a template OUTSIDE the builder: reproduce the
+  builder's `useState` initialisers rather than inventing a mapping (a **rail is a SHAPE**,
+  `rowOrder` is **MERGED** over the defaults, `quick-link` must be **backfilled into
+  `content.quick`**), and render inside a **`CanvasProvider`** — `SupportPortalPreview` reads
+  per-node style off the canvas context, which is what `READONLY_CANVAS` (still exported from
+  `PortalCanvas`) is for.
+- **Industry templates — the plan the next templates are built from (Sep 2026).** The reference is
+  a published doc, *Industry Support Portals*:
+  https://claude.ai/code/artifact/e0392ec4-8e36-4de8-83c9-72732dd00054 — personas, use cases and
+  a tiered widget list per vertical, with an ITSM justification for every widget. The design source
+  is the Claude Design canvas `ServiceOps portal layout system/Support Portal Layout System.dc.html`
+  (21 artboards, ids like `3b`/`4i`; **untracked by git**, backup beside it as `.dc.html.bak`).
+  **Programme** (primary · themed · third): IT & ITES `3B` Sidecar (reworked) · 2A Navy;
+  Healthcare **`5A` Ward Desk** (new, to be generated in Claude Design) · 2A Coral; Manufacturing
+  `4I` Rails only; Government `3I` Wayfinder · 2A Navy · `4B` Broadsheet; Education `4E` Atrium ·
+  2A Coral · `4P` Employee Center; BFSI `4A` Service Center · 2A Navy · `3G` Atlas (held).
+  **PMG rejected** `4H` `4D` `4A2` `3H2` `3D` `3C` outright — ⚠️ `3C` IS the shipped `tpl-counter`
+  and `2A` is the reference behind `tpl-verdant`, so those rejections land on product code.
+  ⚠️ **Industry is a SECOND gallery axis beside `category`**, not a replacement (`category` is
+  department scope) — and each industry gets its **own seed/tile** reusing a layout renderer, or two
+  industries sharing a tile have nowhere to put their own widgets.
+  ⚠️ **Industry-only widgets use the existing `PortalElement.hidden` mechanism** (spec + renderer
+  stay live, palette withholds it) plus a proposed `templates: string[]` so an "In this template"
+  palette group can restore a deleted one. Four of the five Tier 2 widgets are ONE build — a dated,
+  authored list whose items carry a status.
+  ⚠️ **Theme: coral `#F27564` cannot carry text or a white label** — measured 2.80:1 both ways;
+  `#07101F` on coral is 6.80:1. So `#07101F` carries every action and coral is identity only
+  (wash, eyebrow, underline, icon tints); `#C2452F` (5.02:1) is the only coral allowed on text.
+  Ward Desk ships with NO coral — red-adjacent colour already means an emergency on a ward.
+  ⚠️ **The canvas chrome is the PRODUCT's**: all 21 artboards now share one top bar (lucide) and one
+  8-destination rail whose glyphs are extracted from `SidebarIcons.tsx`, drawn as CSS
+  `mask-image` classes (`.ico-*`) defined once in the canvas stylesheet. Service Catalog is
+  deliberately absent from the rail. The in-page icons are still Material Symbols by agreement.
+
+- **Support Portal — the BANNER is a palette element (`x-banner` / `x-search`, Data group).**
+  A blank portal replaces every band with one empty state, so a from-scratch page had no way to get
+  a banner at all — the one thing every reference portal opens with was the one thing you could not
+  add. Both rows carry a `node`, which is what makes them PREDEFINED (one to a page, ticked once
+  placed) under the group rule in the palette bullet above.
+  ⚠️ **`removed` is the ONE flag for "does this page have a banner".** A blank page seeds
+  `removed: ['hero']` and placing the Banner un-removes it, so the palette tick, the canvas and the
+  delete path all read one value. It is also why `HERO_SPEC` could drop `noDelete`: that flag existed
+  because nothing in the palette could put a Banner back, and now something can.
+  ⚠️ **`heroBand` is a CONST placed in BOTH halves of the blank/non-blank ternary** — the same "one
+  card, two possible homes" move `quickSection` makes. Authoring the band twice would be two places
+  for every future banner fix to land in.
+  ⚠️ **Search is the banner's own `showSearch`, not a free-standing widget.** `addElement('x-search')`
+  turns that field on and REFUSES with a reason when there is no banner to hold it; `placedPredefined`
+  counts `hero-search` only while a banner exists and its toggle is on. That IS the single-instance
+  rule — turn the banner's search off and the palette row comes back.
+  **`bannerType`** (`regular` | `card` | `image`, in DESIGN → Banner, drawn by `BannerTypePicker`)
+  turns the hero's content block into two columns via `bannerSide`. ⚠️ `regular` renders `contents` on
+  the wrapper, so the tree every existing page draws is untouched. The card slot is a REAL
+  `RowDrop rowId="hero"` reading `rowExtras['hero']` — the same placement mechanism every built-in row
+  uses, so a widget dropped there is stored, selectable and removable like any other. `slotCols`
+  (1 or 2) and `sideImage` are `when`-gated to their own type.
+  **Height is a `stepRail`** — four stops labelled S · M · L · XL. Height is an ORDERED axis, so a rail
+  says "pick how far along" where four tabs said "four unrelated choices", and it holds one line at any
+  panel width. ⚠️ The VALUES are unchanged (180/260/360/480), so every template and every page already
+  carrying a height renders exactly as before.
+
+- **⚠️ Support Portal — the logo's config lives on the BAR, and that was broken until now.**
+  `header-logo` is a CHILD node of the top bar with its own panel — the `-title`/`-icon` shape — but it
+  was in NEITHER half of that pattern: `ownerOf` did not strip `logo`, so the panel stored under
+  `widgetCfg['header-logo']` while `PortalHeader` reads `wc('header')`. **Uploading a logo had never
+  done anything**, on `main` either. The fix is the documented recipe, both halves at once — `logo`
+  added to the `ownerOf` suffix list AND to `specForNode`'s early-return list, so config resolves to
+  the owner and the panel resolves to the child. The logo also gained **Light/Dark tabs** (`LogoPair`),
+  stored as `logoSrc` + `dark:logoSrc` — the SAME per-mode pair the colour fields use, so `cfgFor`
+  promotes it in dark mode and NO renderer changed. ⚠️ The dark half writes through `viewSet`, never
+  `set` — `set` discards the key it is handed and always writes `f.key`, so a dark upload would
+  silently replace the light logo. ⚠️ The dark slot is OPTIONAL and falls back to the light mark, and
+  the empty state says so: most portals have one logo, and a bar that empties itself the moment
+  somebody tries the dark theme reads as a broken page rather than an unfilled slot.
+
+- **⚠️ Support Portal — the canvas element picker is placed against the VIEWPORT, not the toolbar.**
+  As an absolutely-positioned child of the floating toolbar it was trapped in the canvas's scroll box,
+  so opening one near the foot of the page cut the list off at the bottom edge — the THIRD time this
+  clipping trap has been recorded (the listing kebab and the table's column flyouts carry the same
+  note). It is portalled to the body, `fixed`, and clamped. ⚠️ It opens **ABOVE the toolbar** first,
+  then below, then to a side: the toolbar sits above the element, so the space over it is the closest
+  place the list can go that is still clear of what you are filling. Preferring a SIDE was correct and
+  felt wrong — on a wide section the only side with room is past the canvas edge, so the list appeared
+  over the design panel, a long way from the thing it was adding to. ⚠️ The target is passed as an ID
+  and looked up, NOT found with `closest` from the button: the toolbar is not rendered inside the
+  element's own `[data-node]` wrapper, so the walk returns null and the list silently anchors to the
+  28px button instead — which put it straight back on top of the section.
+
+- **Support Portal — the table cell menu has NO per-cell header toggle.** A header is a property of the
+  first ROW or the first COLUMN, and three surfaces already say so (the two panel switches and the row
+  and column handle menus), all writing the same `headerRow`/`firstColumn` config. The cell toggle was
+  a fourth writer with a different unit: it flipped ONE cell, which could put a `th` in the middle of a
+  body row — a table reading as though it has two header rows and exporting as neither, with nothing
+  able to tell you it had happened. `toggleHeaderCell` stays exported from the model, unreferenced, as
+  the correct primitive if a header-cell feature ever arrives with a coverage map behind it.
+
+- **Support Portal — the REGULAR banner's toolbar and style (15 Sep 2026; shapes SWITCHED OFF).** The user
+  asked for the regular banner back and to grow its controls one at a time, so the Shape field is commented
+  out of `HERO_SPEC` (the shape code below stays) and adding a Banner un-removes the regular band again.
+  **`BannerToolbar`** (PortalCanvas, rendered for `id === 'hero'`, placed just INSIDE the band's top edge —
+  `toolbarBelow === true` now means inside): H align (`contentAlign` left/center/right) · V align
+  (`contentAlignY` start/center/end → the band's justify) · **+** adds a widget BESIDE the text
+  (`BANNER_SIDE_WIDGETS` → `dropInRow('hero')`; `bannerSide` turns on when `rowExtras.hero` has any) ·
+  image (file → `bgKind:'image'`, `bannerImage`) · colour popup · delete. **No drag handle** (user's call).
+  **`PortalBannerTools.tsx`** is shared by toolbar and panel: `BannerFillEditor` (Solid/Gradient →
+  `colorMode`, `bannerColor`, `bannerColor2`, `colorSide`), `SideGrid` (9 sides; strongest-at), and
+  `sideGradient()`. ⚠️ Only a banner that carries `colorMode` renders through it — templates' own
+  `bannerStyle` looks are untouched. **The colour layer**: any image banner gets a gradient span
+  (`data-banner-layer`) between picture and words, `overlayOn` default true, strongest at
+  `bannerLayerSide(cfg)` = the picked `overlaySide` or else the side the text is aligned to (so there is
+  deliberately no `overlaySide` default). Style tab groups: Banner (height) · Background (tabs, image,
+  layer controls, fill editor) · Alignment · **Corners & border** (`bannerRadius`, `bannerBorderWidth/
+  Color/Style`, painted on the band). ⚠️ A `…AlignY` segmented draws vertical glyphs (`AlignRow axis`).
+  ⚠️ **Hooks in `Sel` must sit ABOVE its `if (!enabled || !node) return`** — the service-tile
+  `firstTile` hooks were added below it and blanked the canvas with "Rendered fewer hooks than expected".
+
+- **Support Portal — the banner's words are AUTO-LAYOUT GROUPS, with Figma gap handles (15 Sep 2026).**
+  Two selectable nodes: **`hero-copy`** (Text group = heading + subheading) inside **`hero-content`**
+  (Content group = Text group + search), both → spec `banner_group` (`BANNER_GROUP_SPEC`: Direction ·
+  Gap · Align items). Every element HUGS its own width (`w-fit`). Config keys on each group: `dir`
+  (`column`|`row`), `gap`, `align` (unset = follow the banner's `contentAlign`); `bannerGroupGap()` gives
+  the resting gaps (8 text, 20 content). The banner's own `sideGap` (default 32) is the space between
+  its text and widgets added beside it (field shows only while `__hasSide`). Canvas: **`GroupToolbar`**
+  (direction + align) and **`GapBands`** — pink `#FF24BD` bands MEASURED from the rendered children
+  (`[data-node]`/`[data-gap-item]`; on the hero, inside `[data-gap-parent="hero"]`), draggable
+  (ns/ew-resize), writing the same key the panel's `GapField` does. Groups get no resize handles.
+  ⚠️ **`patchCfg` strips `dir` into the section TREE** — the groups are exempt (`BANNER_GROUPS`), or the
+  direction toggle silently did nothing. ⚠️ Because the Content group hugs, **its widths are `cqw`**
+  (the text column is `container-type: inline-size`): `searchWidth` and the text cap (`contentMaxWidth`)
+  are shares of the banner's text area, since a % of a hugging parent is a % of itself. ⚠️ Horizontal
+  text group never wraps and takes 100cqw, or its two lines wrap back on top of each other and the
+  toggle looks dead. ⚠️ Free placement of heading/subheading/search (`freePlaced`) is OFF — pinning one
+  absolutely would pull it out of its group.
+
+- **Support Portal — the ARRANGED banner: items, presets, gaps, fill-to-edge (`portalBannerLayout.ts`, 15 Sep 2026).**
+  A regular banner holds ITEMS — `hero-copy` (Text group), `hero-search` (while in the band) and every widget
+  in `rowExtras.hero` — laid out by a small tree on hero config, **`bannerTree`** (`BannerNode` = item id, or
+  `{ d: 'row' | 'column', c }`). ⚠️ The stored tree is a PREFERENCE: every read goes through
+  **`normalizeTree(stored, items)`**, which drops leaves whose item has gone and appends new items (search
+  under the words, anything else beside), so delete/add/search-off need no bookkeeping. **Presets**
+  (`presetsFor`) are built from the current leaf order and vary by count (2 → 2, 3 → 6, 4 → 7, 5+ → 4); the
+  picker (`BannerPresetPicker`) draws each thumbnail FROM the tree it applies, labelled per item. It lives on
+  the banner toolbar (LayoutDashboard popup) and in the panel's **Layout presets** group (⚠️ NOT named
+  "Arrangement" — that group name is in the drawer's `DROP_GROUPS` and silently vanishes). **Gaps**: two,
+  both on `hero-content` config — `gap` between side-by-side items (default 20) and `gapY` between stacked ones
+  (default 20, independent); the panel's `contentGap`/`contentGapY` are redirected there by `patchCfg`, and
+  selecting the banner shows pink `GapBands` for every nested row/column (`[data-banner-root]` +
+  `[data-gap-parent="hero-content"]`, direction read from computed `flex-direction`). ⚠️ The arrangement root is
+  a PLAIN div, not the `hero-content` Sel — it fills the band and as a node it swallowed every click meant for
+  the banner. **Padding** is the banner's own spacing (`styles.hero.padding`) applied to the items that TOUCH
+  the band's edges (`childEdges`), never between items; left/right % are emitted as `cqw` of the root so a %
+  means the same at any depth. `Sel` withholds padding for `hero` (it used to land OUTSIDE the band, reading
+  as margin). **Fill to edge**: `bannerBleed: string[]` on hero config (toolbar Expand button on a banner
+  widget) drops those edge paddings and stretches the widget (`.portal-bleed` rules in theme.css); an
+  Announcements placed on the banner seeds `display: 'image'` + bleed. **Column widths**: `bannerSplit`
+  (Auto/1:1/2:1/…) for a two-column root; Auto gives the words 2 shares beside a compact block
+  (`COMPACT_BANNER_TYPES`). **Hover adders** on any banner item (`addBannerCell`) insert a `bn-slot` empty
+  cell (`insertBeside`); its "Add to banner" picker Replaces it in place (`replaceLeaf`). Move arrows reorder
+  leaves (`shiftLeaf`). Narrow banners (<640px, `@container portal-banner`) stack every row. Which banners
+  take the tree: `treeBanner` = not a rail, not side-search, not shaped, and not a template `bannerLayout`
+  until a preset is picked on it.
+  **Action cards block (`x-actions`, spec `action_cards`)** = the four `content.quick` cards drawn by the
+  preview's own `quickCardEl` (provided to placed elements through `PlacedBlockRenderers`), grid of 1–4
+  columns (`cols`, toolbar Columns3 popup; `colsTemplate` drops columns under 150px). ⚠️ Placing it anywhere
+  sets `actionsMoved`, which stops the Quick Actions row rendering — the cards move, never duplicate; deleting
+  the block brings the row back. It is `onPage: true` ONLY so the demo seed does not drop one on every page
+  (which silently hid the Quick Actions row). **KPI tiles (`x-kpis`, spec `kpi_group`)** = a collection of
+  `{label, source}` counters, same 1–4 column preset, counts off `COUNTS`. On the banner both seed `cols: '1'`.
+  ⚠️ **Columns are EXACT** (`colsTemplate` = `repeat(cols, minmax(0,1fr))`): the first version dropped to
+  fewer columns under a minimum card width, so 3 and 4 silently came out as 2 in a banner column. The panel
+  field is **Presets** (`tilePresets` control → `TilePresetPicker`), thumbnails drawn with the block's REAL
+  card count (visible `items`, or `__tileCount` = `content.quick.length` seeded by `cfgFor` for x-actions):
+  All in one row · 3 per row · 2 per row · Stacked. On the banner a compact block's column share grows with
+  its column count (`cols × 0.6`, min 1) so cards laid across get room.
+  ⚠️ **The bottom reserve is MEASURED, not fixed:** `quickOverlap` = how far the Quick Actions row
+  actually climbs (`-(styles.quick.margin.top ?? -62)`, floored at 0). Dragging the row's top grip down
+  out of the banner removes the reserve, so a fill-to-edge widget reaches the banner's bottom again.
+  **A widget is PLACED inside its cell** by its own toolbar alignment: `styles[id].alignY` → the cell's
+  `justify-content` (top/middle/bottom), `styles[id].align` → the cell's `align-items`; `sizeOf` skips
+  `alignSelf` for banner widgets (`alignsInside`). It stretches to fill the cell (`portal-bleed`) only while
+  it fills the edge AND has no dragged height AND no vertical alignment of its own.
+  ⚠️ **Testing trap:** a hot reload of `PortalCanvas.tsx` swaps its context object mid-session, so the canvas
+  silently reads the read-only default (no `data-node` anywhere, no outlines). Reload before judging.
+
+- **Support Portal — a preset skeleton draws THE SECTION, not a bar chart of it (16 Sep 2026).** The
+  arrangement thumbnails and the KPI/Action-card column presets (`PortalBannerTools`) drew every block
+  as bars on a ground, so a KPI block, a row of action cards, Contact Us, an image and a paragraph all
+  made the same picture — a thumbnail that cannot tell those apart is answering a question nobody
+  asked. Now each section is drawn as the thing it IS:
+  **`MiniCard`** is the shared card face (white, hairline border), and every block that renders as a
+  card on the canvas gets one — **KPI** (number over label), **Action cards** (icon badge + title, icon
+  LEFT in one column and on TOP across a row, the two shapes `cardTemplate` draws), **Contact Us** (a
+  heading over two badge-and-line rows), **the list cards** (a heading over its rows). A **picture**
+  (`PictureArt`: a grey plate with the sun and the hill) is the one thing that is neither a card nor a
+  line, and it BLEEDS — no ground, no inset — exactly as it does on the banner.
+  ⚠️ **Announcements draws the card TYPE it is actually showing** — regular (heading + two rows),
+  carousel (heading + a row + dots), image (a picture over the dark band) — because those are three
+  different cards, not three settings of one.
+  ⚠️ **The drawings are read from each widget's RESOLVED CONFIG**, through a new `cfgOf` reader: the
+  canvas toolbar has one on its context, and `PortalWidgetDrawer` takes it as a PROP because the panel
+  renders OUTSIDE `CanvasProvider` and would otherwise pick up the read-only default and draw every
+  block at its factory shape. ⚠️ Columns follow the CELL: a full-width section runs its cards across,
+  a narrow column stacks them, and `__colsSet` (the admin's own choice) wins — the same rule
+  `bannerCols` applies on the canvas, so the tile promises the layout the banner will produce.
+  ⚠️ `CardSkeleton` in the column-preset picker now CALLS the same two card drawings; a KPI card that
+  looked like a card in one picker and like two bars in the other was two answers to one question.
+  Tiles went to 88px and every section keeps a 3px inset from its ground — cards with a face and a
+  border need the room bars did not.
+- **Support Portal — the Media Slider asks its question in its own words, and a slide can carry a
+  picture (16 Sep 2026).** The group was called **Navigation** and offered "Data only" / "Data + image",
+  which named neither what it decides nor what you get. It is **Carousel type** now — the same question
+  the Announcements card asks under "Card type" — with **Data only** / **Image with data**; the word
+  "carousel" sits in the group's title so both buttons hold one line at any panel width. The one shared
+  `bgImage` stays gated to Data only, where the words slide over it.
+  ⚠️ **A slide's image could not be uploaded at all, on `main` too.** `PortalItemList`'s inline editor
+  draws `fields[0]` as a line of text and `fields[1]` as a paragraph WHATEVER they were declared as, and
+  for a slide those were `kind` (segmented) and `src` (upload) — so the panel showed a text box reading
+  "image" and a textarea labelled "Source", and with `inlineCoversAll` there is no chevron to a drawer
+  that would have drawn them properly. A field the inline editor does not draw has NO surface.
+  The fix is a new collection option, **`inlineImage`** (`{ key, label, altKey, altLabel, when }` on
+  `CollectionSpec`, passed through `PortalWidgetDrawer`), drawn at the TOP of the inline editor — a slide
+  is a picture with words over it, and the words read differently once you can see what they are on.
+  ⚠️ Its control is **`InlineImageField`** (PortalControls), NOT `ImageUploadZone`: that zone's smallest
+  size is a 132px drop target, taller than the two text fields it sits with, so every open row in the list
+  would scroll twice as far for a thumbnail. The compact form is a 44px preview beside one line of
+  controls (measured 271×69) and the whole row is still a drop target. Alt text sits UNDER the picture
+  and only once there IS one — an alt box above an empty slot asks you to describe nothing.
+  ⚠️ **Media type (Image / Video) is gone from the panel**: `SliderRender` draws an `<img>` whatever it
+  says, so it was a control with no effect — and it was the text box reading "image". A stored `kind` is
+  untouched, so nothing already on a page changes. ⚠️ The Media Slider is NOT hidden any more (no
+  `hidden` on `v-slider`), whatever the Parked-features section below still says.
+- **Support Portal — the Announcements card, six fixes (16 Sep 2026).** (1) The REGULAR card carries its
+  own **View all ›** in its heading (`WidgetTitle`'s `action`, drawn exactly as `CardShell` draws every
+  other card's). ⚠️ The two carousels do NOT: their last dot already turns Next into "View all", so a
+  second copy would sit one line above it. (2)(3) The **Card type** tiles are now **Regular · Carousel ·
+  Image with carousel**, each sketch bounded in the CARD's own frame — white, bordered, rounded — with the
+  name underneath; the old ones floated loose in the tile and the picture one read as a swatch. ⚠️ The
+  stored values are unchanged (`regular`/`carousel`/`image`), so every card already on a page keeps its
+  shape. (4) The image card's corner radius is **0 by default** and is the SAME value the Style pack's
+  Corner radius writes — `chosen(styles, nodeId, 'radius')`, own-only, exactly as `containerCss` reads it.
+  ⚠️ It was a hard-coded `rounded-xl`: the one card whose face reaches its own edges was the one card
+  whose corners could not be changed, because the slider wrote a number the root painted over.
+  (5) **The picture stretches, the band does not.** `.portal-ann-image` is `min-h-[200px] flex-1` inside a
+  `flex-1 min-h-0` root, so a dragged (or row-stretched) height goes to the photo and the text band keeps
+  its own. Measured on the work rail at 350px: fixed-height 200 + band 120 = 320, leaving 30px empty under
+  the band (the reported gap); flex 229 + 120 = 349, nothing empty. (6) Banner **preset tiles draw every
+  section as a block on its own faint ground** (`CELL_ON`/`CELL_OFF` in `PresetArt`) with a 4px gap and a
+  taller 76px tile (`SkeletonTile tall`) — bare lines 3px apart read as one grey smudge, so the
+  arrangement, the only thing the tile exists to say, was the one thing you could not see. ⚠️ The
+  skeletons that used to paint their own `FILL_*` ground no longer do (a block on a block reads as two
+  nested things), and the action/KPI card rows went WHITE so they read against the new ground.
+- **Support Portal — preset pickers are SKELETON tiles (15 Sep 2026).** `BannerPresetPicker` (banner Arrangement) and `TilePresetPicker` (Action cards / KPI columns) in `PortalBannerTools.tsx` both draw in ONE `SkeletonTile` — the Card templates tile (64px, `rounded-lg border-2`, blue when lit), with the preset's name on the tooltip only. Words inside every block made the arrangement grid a wall of truncated labels. Banner items are drawn as the shape they make (`ItemSkeleton`): text = two lines, search = a field outline, Announcements/image = a picture block, KPI/action cards = two card rows, an empty slot = dashed. `TilePresetPicker` takes `kind` ('action' = icon + line, 'kpi' = number over label) and lays every preset in ONE row. The same components render in the panel AND in the floating toolbar — the banner's Layout popup and the KPI/Action-cards **Presets** popup (which replaced the 1/2/3/4 number buttons). ⚠️ Four stacked items must fit 48px inside a tile, so skeleton heights are tight; check the Stacked tile after changing any of them. **Fill-to-edge (`bannerBleed`) was REMOVED** from banner widgets' toolbar; it is no longer seeded for Announcements and a stored value is ignored by the renderer, since nothing could turn it off.
+- **Support Portal — the BANNERS menu (`PortalBannersPanel.tsx` + `portalBannerTemplates.ts`, 15 Sep 2026).** A rail item under Branding. It offers every **shipping** layout from the layout-templates gallery (`localhost:5173`, source served from its `layouts/` + `js/templates.js`; the 8 Rejected ones are out): **Horizontal 25 + Default**, **Vertical 4** (4f Front Desk, 4f2 Counter · Image, 4g Half Deck, 4e Atrium), with an Industry filter. ⚠️ Each banner is built with THIS editor, not drawn: `BannerTemplate` = hero config (colour/gradient via `colorMode`, height, radius, `bannerInset`, copy, `bannerSplit`) + title/subtitle typography (→ `styles['hero-title'|'hero-subtitle']`, `styles.hero.type.title.lineHeight: 'tight'`) + `pad` + Content-group gaps + `pieces` (widgets: `x-actions` with `look: 'glass'`/`firstSolid` or `look: 'row'` (compact bordered rows: bare blue glyph, title only, chevron — Bedside), and a near-white banner automatically gives the search a hairline border, `x-kpis` with `look: card|outline|glass` and items carrying an optional fixed `value` + `hint`, `c-announcements` display, `c-contact`, `b-list`, `b-button`, `v-image`) + a `tree` of piece keys (`copy` = hero-copy, `search` = hero-search). `instantiateBanner()` mints widget ids once. ⚠️ **`bannerDecor` is the banner's DESIGN, never a widget** (user's call): `pattern` grid/dots, `accent` left bar, `eyebrow` dash/date/text (rendered inside the Text group, not selectable), `shape` circle/rings/bars/hazard — drawn by `BannerDecorLayer` in the preview. ⚠️ **Our search is on every banner.** ⚠️ No photos ship: `photoSlot: true` + `bgKind: 'image'` with no image paints a slate ground + `BannerPhotoSlot` (drop-or-browse chip, top-left, writes `bannerImage`); image widgets use `ImageDropSlot`, and the announcement image's empty state is now a real `ImageUploadZone` (`coverImage`). Picture cells fill their height via `.portal-fill` (theme.css). **Applying** (`applyBannerTemplate` in the builder) REPLACES only the banner: hero keys in `TEMPLATE_HERO_KEYS` are dropped then written, `hero-copy` cleared, `hero-content` replaced, page keys in `TEMPLATE_PAGE_KEYS` swapped (vertical sets `heroPlacement: 'left'` + `quickLook: 'rail'`), styles for `TEMPLATE_STYLE_IDS` replaced, `rowExtras.hero` swapped, `removed` loses `hero`. ⚠️ A vertical banner sets the Quick Actions row to ONE column (`quick.cols`, remembering the old value in `railColsPrev`) and every horizontal pick / Default hands it back. **Default** restores the banner exactly as the page OPENED (`defaultBannerRef`, captured at first render). Reset to default is unchanged. Active tile = `hero.bannerTemplate`.
+- **Support Portal — a built-in BLOCK can be dragged onto the banner (16 Sep 2026).** My Open Requests, Pending Approvals, My Assets, My CIs, Announcements, Most Read, Contact Us, Favourite / Most Used Services and the Quick Actions ROW are not placed elements, so `moveToBanner` used to refuse them ("Only widgets can go on the banner"). Each one has a palette element that draws the same card — `PortalElement.node` names the block it stands for — so `blockAsWidget()` maps block → element id (`quick` → `x-actions`) and `bringBlockToBanner()` lands THAT widget on the banner, honouring the aimed edge/slot like any other drop. ⚠️ The block's CONFIG is copied onto the new widget, or a card that had been given a title or a row count would arrive wearing the product's defaults. ⚠️ The block is added to `removed` so it leaves the page — EXCEPT `quick`, because `actionsMoved` already hides that row and a second mechanism would keep hiding it after the banner copy was deleted. An individual `quick-*` card is still refused, with the reason naming the row.
+- **Support Portal — section presets at ONE widget, and the move arrows (16 Sep 2026).** Three fixes to one complaint: a section holding only the Action cards block could be neither split nor moved. (1) The section panel’s **Presets** row is offered from ONE item (`__count >= 1`), not two, and `presetsFor(1)` returns Columns · Grid · Three across (`stack` drops out — it draws the same single cell `cols` does). (2) ⚠️ At one widget a preset means “give me this many columns”: `grid.rows(1)` is a single full-width cell, so picking Grid changed nothing and the control looked dead. `applyPreset` asks for the shape’s NOMINAL cells (`rows(0)`) below two items, and the tiles draw the same, so Grid splits the section in two with the widget in the first cell. (3) **`moveNode` now handles a placed ELEMENT and an added SECTION.** An element is not a box — it is a box’s content — so it fell past every branch onto “nothing to swap it with”; it now moves the BOX it sits in among its siblings, or its entry in `rowExtras` for an element dropped into a built-in row. A section used to swap two entries of `sections`, which only ever reordered sections pinned to the SAME band, so the common case (one section under its own band) silently did nothing: a section’s place is its ANCHOR then its position within that anchor’s group, so moving past the edge of the group re-anchors it to the neighbouring band. ⚠️ `moveIn` is GENERIC now (ids, boxes and placed elements all ask it for the same one step), which also cleared two long-standing `Box[]`/`string[]` type errors.
+- **Support Portal — banner and data-card fixes (16 Sep 2026).** (1) The **Arrangement** button and the whole **Layout presets** group are withheld while the banner holds ONE section (`__bannerSections`): there is no arrangement of a single thing, and the popup would open on its own empty state. (2) ⚠️ **`Sel` no longer wraps a banner GROUP’s children** when a width or height is set. That wrapper becomes the children’s flex parent, so the direction, gap and alignment the group sets on its own box stopped reaching them — dragging the Text & Search section narrower left its search pinned to the left edge while the heading stayed centred. (3) ⚠️ **`removeBox` carries `band` onto the survivor.** A box hosting a built-in band keeps `band: 'hero'`; dropping it on collapse left a section that still claimed to host the banner with no box drawing one — so deleting the empty column beside the banner deleted the BANNER, and deleting again brought it back. (4) The banner’s own four adders take the OUTER track (`outer` on `ColumnAdders`, a quarter down each edge) and say “beside the banner”; the section inside keeps the middle. Two controls on one point went to whichever painted last, which is how “add a column beside the banner” kept adding a section inside it. (5) **Card blocks on the banner follow the SHAPE of their section**: a section spanning the banner runs its cards all the way across, a narrow column stacks them (`bannerCols` in the preview, filled while the banner draws). ⚠️ A merged config cannot tell a default from a choice, so `cfgFor` seeds `__colsSet` from the RAW store — without it the spec default (4) always won and the rule never applied. `seedBannerItem` no longer stores `cols: '1'`. (6) A band of data cards (`__dataBand`: quick / favourites / services / records) keeps its presets and gap and drops **Content alignment** — equal cards filling a row leave no free space for it to act on. Selecting the cards themselves opens with **Card templates** (`DATA_TILE_SPEC`), and `RecordTiles` honours `cardTemplate` (icon left / top / right / none). (7) **Gap fields follow the shape**: `gapSeed` reports `__hasCols`/`__hasRows` (a band from its column count and whether its cards wrap; a section from the axes of its branches; the banner from its tree) and `GapPair`/the hero panel show only the axes that exist — each keeping its own value.
+- **Support Portal — the CUSTOM CARD (`x-card` → `custom_card`, 16 Sep 2026).** The card a portal keeps
+  needing and had no element for: a promo, a help block, a list of links. **Pick a shape, then fill its
+  slots** — five named layouts (Image right · Image left · Image on top · Text only · Links), drawn as
+  tiles by `CardLayoutPicker`. ⚠️ The SLOTS are the same in every shape — heading, subtext, picture,
+  button, links — so changing the layout rearranges what is there rather than asking for it again; a
+  shape that cannot draw a slot simply does not, and the value stays stored for the shape that can.
+  Repeatable (Custom group), heading and subtext are the card's own text nodes so they are edited by
+  clicking the words, and an empty button label draws nothing.
+  ⚠️ **The `@container` and the query must be on DIFFERENT elements.** An element cannot answer a
+  container query it declares itself, so with `@container` and `@[420px]:flex-row` on one div the
+  side-by-side layouts never fired and every image card came out stacked however wide it was.
+- **Support Portal — a card's TITLE can sit above it (16 Sep 2026).** Every data card has a Title control
+  — inside the white card, or on the page above it, which is the shape the two service rows have always
+  had (their default stays `outside`; every other card defaults to `inside`, so no page moved). The head
+  is built by `CardShell` because the widget owns the words, the count and the link — the wrapper knows a
+  card is there, not what it is called — and ⚠️ `cardInner` reads the same key and stops painting its
+  surface, or the heading ends up in a white box with a second white box under it.
+- **Support Portal — the PREDEFINED bands have gap handles too (16 Sep 2026).** Quick Actions, Favourite
+  Services, Most Used Services and the work / records rows now show the same pink strips an added section
+  and the banner already had, and dragging one writes the band's own `colGap` / `rowGap` — the pair
+  `secGapCss` already rendered. `GAP_BAND_NODES` (PortalCanvas) is the list, and ⚠️ a band on it must also
+  mark the box that lays its cards out with `data-gap-parent="<its id>"` in the preview: the strips are
+  measured off the real children, so a band that does not name its container silently has none. `RowDrop`
+  carries it for quick / work / records; `ServiceTiles` for the two service rows; `work-main` its own.
+  ⚠️ The drag writes `gapPairX` / `gapPairY`, the keys the PANEL's field writes, so both routes go through
+  the one redirect in `patchCfg` rather than each writing the final keys itself.
+  ⚠️ **The two service rows had no Gap control at all** (“the grid’s spacing is the design’s”) and their
+  tiles were a hard `gap-3`; both are the admin's now — the field is back on each spec and `ServiceTiles`
+  takes the pair as a prop. ⚠️ Its group is **`Gap`**, NOT `Layout`: `groupsFor` drops every field in a
+  group called Layout, with one exception carved out for the preset picker, so a Gap declared there renders
+  nowhere and the panel looks unchanged. Measured: panel 12→32px, drag −25px took 70→45px.
+- **Support Portal — a banner ROW or COLUMN is a node (16 Sep 2026).** Every branch of the banner tree
+  renders as a `Sel`, so clicking the space around the sections selects the container: its own outline,
+  its name, its floating toolbar and its own panel — the model the page's section boxes already have.
+  ⚠️ **The id is its CONTENTS, not its position**: `hero-bx-<the sections it holds>` (`bannerBoxId`,
+  built on `cellKey`). A branch IS its sections, so the id survives a sibling arriving, a preset being
+  re-picked and the branch moving, and it changes exactly when the branch stops being the same branch —
+  the positional ids the page boxes abandoned (`sec-3-c0`) renamed every box after an insert and every
+  stored value landed on the wrong one. Registration goes through the SAME `registerBox`, so `nodeById`
+  names it by its parent's direction (a child of a row is a Column) with no new naming code.
+  ⚠️ **The ROOT is deliberately not one of them** — it fills the whole banner, so as a node it would take
+  every click meant for the banner itself.
+  ⚠️ **No Behaviour control, and it was built and then taken out.** A branch's direction is ALWAYS the
+  opposite of its parent's, because `prune` merges a branch into a parent laid out the same way — so
+  flipping one ALWAYS dissolved it into its parent. The resulting layout was right, but the thing you had
+  selected no longer existed: a control that deletes what you are configuring, wearing the name of a
+  setting. The Arrangement presets are how the shape changes; this panel is what the row is LIKE.
+  ⚠️ **No resize handles either** — the banner sizes a row's columns by WEIGHT (`weight()` in the
+  preview), so a dragged `widthPct` would be a number nothing reads: the handle would move and the column
+  would not. Stretching a row needs weights in the tree first, and that is the next piece.
+  ⚠️ **`P1` is what makes the panel exist**: the drawer drops the whole Design section for a widget with
+  nothing to style, so a spec with no fields and no packs opened as an empty drawer under a title. It is
+  also the honest answer to what a row is — a box that can take a fill, a border and corners (verified:
+  Corner radius 16 paints 16px on the row). Spacing and Shadow come with the drawer; the two alignments
+  are on the toolbar. ⚠️ `ownerOf` returns a banner box unchanged: its id ENDS in the id of its last
+  section, and one of those can be `hero-search`, which the suffix stripper read as a search child.
+  ⚠️ A group named **`Layout`** is removed from every panel by `DROP_GROUPS` — that is why this spec's
+  one field rendered nowhere until the group was renamed.
+- **Support Portal — the preset set is chosen by SECTION COUNT, and a tile draws grey boxes (16 Sep 2026).**
+  `PRESET_SHAPES` is keyed by how many sections the banner holds — **2**: two rows · two columns; **3**:
+  three rows · three columns · two columns then a row · a column with two rows beside it; **4**: four rows
+  · two columns then two rows · three columns then a row · two columns with the second split, then a row.
+  ⚠️ Every shape is a different ARRANGEMENT, never one mirrored: a tile that re-places the same sections
+  in the same relationship asks the admin to tell two identical layouts apart. A banner takes at most four
+  sections (`MAX_BANNER_SECTIONS`), so that is the whole vocabulary.
+  ⚠️ **A tile draws the Text & Search section and grey boxes.** It answers ONE question — how the sections
+  are arranged — and drawing each widget's own insides answered a second one nobody asked, at a size that
+  could not hold it (four action cards in a 38px band leaves 10px a card). The text section keeps its
+  drawing because it is on every banner and it is what you locate the layout by. The per-widget drawings
+  and the `cfgOf` reader they needed went with them; the COLUMN-preset picker keeps its card art, where
+  one row of cards has the room.
+- **Support Portal — banner presets were a FIXED set of eight layouts (16 Sep 2026, superseded by the bullet above).** `PRESET_SHAPES` in `portalBannerLayout` — Stacked · Two columns · Two columns, text right · Text left, two stacked right · Text over a row · Row over text · Three across · Two columns, strip below — taken from the arrangements that repeat across the 37 gallery layouts (https://zenichakalasiya.github.io/support-portal-templates/). ⚠️ The list no longer GROWS with the sections on the banner: generating every combination gave 13 near-identical tiles at four sections and asked the admin to pick a layout out of arithmetic. Each shape is written in SLOTS (slot 0 = the first section, the Text & Search one); `fill()` drops slots with no section and appends any section past the last slot as its own full-width ROW, so a preset never hides a section. Shapes identical at the current section count are shown once (`presetsFor` dedupes on the built tree): 2 sections → 4 tiles, 3+ → 7. ⚠️ **A newly added section always lands as a new ROW at the foot** (`append`, read through `normalizeTree`) — a preset is a layout somebody chose, and a widget inserting itself into it would rearrange that on their behalf; splitting the new row into columns is then the drag or the + handles. Action cards are an ordinary section here (the user's call), not a pinned bottom strip.
+- **Support Portal — banner sections are placed by DRAGGING, not only by presets (16 Sep 2026).** Every banner section is a drop target (`BannerCell` in `SupportPortalPreview`): the pointer's EDGE decides what you get — left/right inserts a COLUMN beside it, top/bottom a ROW above or below — nested at whatever depth the aimed section sits, so a drop on a section inside a column stacks inside THAT column rather than across the banner. It reuses the section columns' own `zoneFor` hysteresis, `DropLine` and the reserved-space preview (half the width for a column, a 56px band for a row), so the line you see is the promise. ⚠️ CAPTURE phase, the reason `ColumnBody` gives: the `Sel` inside the cell stops propagation, so on the bubble phase the cell would never hear a drag already on the page. An empty slot (`bn-slot`) takes no line — it takes the drop whole. `moveToBanner`/`dropIntoBanner` take an optional `side` and go through `insertBeside`; without one (a drop on the background) a move still SWAPS. The Text & Search section is dragged by a GRIP on its own `GroupToolbar`, so it moves like any widget.
+- **Support Portal — the banner is a set of SECTIONS (15 Sep 2026, validated with the user).** Presets arrange SECTIONS only — never the pieces inside one (see the fixed preset set below). **At most 4 sections** (`MAX_BANNER_SECTIONS`; `bannerFull()` in the builder refuses a 5th with a toast in dropInRow/addBannerCell/dropIntoBanner/moveToBanner — filling an empty slot is never refused). Sections: (1) **Text & Search** = node `hero-content` (`TEXT_SECTION`) holding the Text group (`hero-copy`: title + one-liner) and the search — ONE tree leaf. It fills its cell; its toolbar (`GroupToolbar`) has direction plus TWO align popups: horizontal `align` start/center/end/stretch (stretch = spread to both edges when side by side) and vertical `alignY` start/center/end/**stretch** (words pinned top, search pinned bottom, `justify-content: space-between`). The panel shows `alignY` via `__textSection` (seeded by `cfgFor`). Its inner gaps: `hero-copy.gap` (title↔one-liner) and `hero-content.gap` (text↔search). (2) each widget — Announcements, KPI tiles, Action cards, Quick links, Contact — keeps its own inner arrangement; KPI tiles and Action cards have their own `tileGap`. (3) Image and Text are sections too. **Button is no longer offered on the banner** (`BANNER_SIDE_WIDGETS`). ⚠️ **Gaps between sections are the banner's own `sectionGapX` / `sectionGapY`** (panel `contentGap`/`contentGapY` redirect there; the pink bands in tree mode write them; tree rows carry `data-gap-parent="hero-sections"`) — they no longer share a key with `hero-content`'s inner gap, so rows, columns and a section's insides move independently. ⚠️ Legacy trees naming `hero-copy`/`hero-search` as leaves are merged into `hero-content` by `mergeWords` inside `normalizeTree`. ⚠️ **The banner's edge + now adds a PAGE column beside it** (`splitBand('hero', side)` — the built-in band-hosting mechanism; the preview draws `heroPlaced` = the hero inside its host `AddedSection`, and `quickClimbs` is off while hosted). Sections inside the banner come from its toolbar + and the + beside each section. Banner templates use piece key `text`, a `text: {dir, gap, align, alignY}` block and `sectionGap: {x, y}`; Broadsheet's buttons became action cards in a row.
+- **Support Portal — spacing fields show REAL resting values (15 Sep 2026).** `SpacingMatrix` takes `resting` and shows it for any side nobody set; `useRestingSpacing(nodeId)` measures it off the canvas (computed padding/margin; horizontal converted to % of the parent width; an own-surface element's padding read one level in; the banner is a fixed 24px rest because it pads its edge CELLS, not itself). Set values — including 0 — still win. Both drawer call sites go through `RestingSpacing`. KPI/Action-card preset skeletons use a FIXED row height so a one-row preset reads as short wide cards, not tall bars.
+- **Support Portal — the SHAPED banner (Banner Builder phase 1 of 4, 14 Sep 2026; hidden since 15 Sep).** Spec:
+  https://claude.ai/code/artifact/6836c07d-d9c2-4273-9fe9-f610f67f92a3 — decisions: vertical banner is a
+  column beside the page, fixed while it scrolls (4f/4g); a curated set of blocks; the photo panel takes
+  an image or an announcement carousel; shapes arrive READY-FILLED; editor powers = change shape keeping
+  content, Replace, Quick styles, Save as my banner. **Phase 1 (built):** the banner's content is an
+  ordinary `CustomSection` flagged **`banner: true`** (afterId `hero`, at most one), drawn INSIDE the
+  hero band by `heroBand` and filtered out of the page's section loops — so split, drop, drag, Replace and
+  delete all work on the banner with no second implementation. The hero band keeps its background,
+  artwork and height. `BANNER_SHAPES` (supportPortalData) are 6 horizontal starting shapes as a tree DSL
+  (`ShapeNode`); **`applyBannerShape`** (builder) builds the tree, each slot first TAKING an existing
+  element of the same type so content survives a shape change, and anything with no slot goes into a new
+  row at the foot with a toast — never deleted. Element ids are kept, so their config/style travel.
+  Heading and search are blocks **`bn-heading` / `bn-search`** (hidden catalogue entries) rendered via the
+  `BannerParts` context with the hero's OWN node ids (`hero-title`/`hero-subtitle`/`hero-search`), so
+  inline edit and their panels are unchanged; deleting `hero-search` deletes its block. ⚠️ **One gate,
+  `bannerRefusal`**, is called by dropInColumn, dropBeside, relocate, Replace and addElement: only
+  `BANNER_BLOCKS` types (portalPageModel) go on a banner, heading and search once each, and a refusal
+  gives the reason rather than falling through to a new section. The canvas "+"/Replace pickers offer the
+  same list (`inBanner(id)`). The banner's section renders through `SectionShell bare`, so a click on the
+  background still selects the BANNER. The Shape picker (`BannerShapePicker`, thumbnails drawn from the
+  shape tree) is the hero panel's first group; the old `bannerLayout` field only shows for a legacy page
+  still carrying a layout, and `showSearch` hides once shaped. ⚠️ On a non-blank page the band keeps its
+  86px bottom reserve, or the Quick Actions overlap covers the banner's content. **Next:** phase 2
+  (background layer: photo panel w/ drag edge + carousel, overlay, pattern, Quick styles), phase 3
+  (vertical, fixed), phase 4 (templates onto shapes + Save as my banner).
+
+- **Support Portal — the banner's HEIGHT rail (17 Sep 2026).** Four stops: **260 · 400 · 540 · Screen**,
+  140px apart. S is the height a banner already has and Screen is measured at render, so the two in
+  between divide that distance into moves somebody can point at — the first pass put them 20px apart,
+  which on a 260px band is not a move. ⚠️ **Screen stores the WORD `screen`**, not a number: the height
+  is measured from the BANNER'S OWN TOP to the bottom of the scroll port, so whatever sits above it (the
+  top bar) is taken off. Measured for the same reason the sticky rail is — published, the page scrolls in
+  the window and `100vh` is right; in the builder the page is a card inside a scrolling pane that starts
+  ~100px down, where `100vh` hangs the banner's last hundred pixels below the fold. Verified in Preview:
+  the band's bottom lands on 876 in an 876px viewport. ⚠️ **Two places read the height as a NUMBER** and
+  would take NaN from the word — the band's own `minHeight` (an invalid value is dropped silently and the
+  banner falls back to its content height) and the banner-layout thumbnail (NaN survives both clamps and
+  draws a band with no height). ⚠️ A page carrying any other number still renders it: template banners are
+  authored at heights the rail never offered (560, 340, 220…), and snapping them to the nearest stop would
+  redesign forty shipped banners to tidy one control. `StepRail`'s labels size to their word now, ends
+  hanging inwards — a fixed 24px box was fine at one or two letters and ran "Screen" off the panel's edge.
+- **Support Portal — INDUSTRY tags on template cards (`PORTAL_INDUSTRIES`, 17 Sep 2026).** Six, fixed:
+  IT / ITES · Healthcare & Pharma · Manufacturing · Government · Education · BFSI. ⚠️ A **SECOND axis
+  beside `category`**, never a replacement — category is department scope (whose desk this portal is),
+  industry is whose business it is, and a hospital's IT desk is both. The list is closed because these are
+  the verticals the portal programme is designed against, and an open one is how two templates end up
+  tagged "Health" and "Healthcare" and neither finds the other. **Two upfront, the rest behind a +N**
+  whose tooltip names them, on the NAME'S OWN ROW at the card's original 268px — a second line grew every
+  card by 30px to carry two words, and a grid of templates is read by its pictures. ⚠️ What made room:
+  the **category chip moved onto the thumbnail**, opposite the DEFAULT badge. Measured, a name plus two
+  industries plus a count plus a category wants 371–401px of a 351px row, and the category is the one
+  already answered by the filter chips directly above the grid. ⚠️ `industryChip()` may return a SHORTER
+  label than `industryName()` — exactly one does ("Healthcare & Pharma" → "Healthcare"), because at 123px
+  it ate an 83px share and clipped a template's name to fit an ampersand. ⚠️ The **+N tooltip is
+  `delayDuration={0}`**, against the product's 700ms default: that default is right for a tooltip
+  repeating a label you can already read, and this one carries the only statement of which two industries
+  are hidden. ⚠️ Its React `key` goes on the `Tooltip` itself, never on a wrapper `<span>` — an inline box
+  around the chip is taller than the chip, and the one card with a shortened tag came out 3px taller,
+  which stretched its whole grid row.
+- **Support Portal — the ICON PICKER opens BESIDE the icon (17 Sep 2026).** It pinned itself under the
+  anchor and then CLAMPED that into the viewport, so anywhere in the lower half of the screen the clamp
+  dragged it back over the icon and you picked a glyph blind. It takes whichever side has more room, caps
+  its height to that room rather than to a flat 420, and is placed from its BOTTOM edge when it goes above
+  — the popover's height depends on what the search left, so a bottom anchor needs no measuring.
+- **Support Portal — a Custom Card LINK is a node you can style (17 Sep 2026).** Each link is
+  `<widget>~i<n>` with its label at `~label`: click the words to type them, click the glyph to open the
+  shared 43-icon picker. Its collection carries `packs: ['P1', 'P6']`, so the item's drawer reads
+  **Style · Icon · Spacing** — its own fill and border, and the glyph's size, colour, container and
+  position, all keyed to the ITEM so one link can differ from the one under it. The renderer reads all
+  five per item with `chosen` (own-only): resolving up the chain would let a value set on the card
+  silently restyle every row nobody had touched. ⚠️ **Position is applied with `order`, never
+  `flex-row-reverse`** — reversing the row carried the ARROW with it and put the product's
+  "this goes somewhere" glyph on the left. Top is a wrap with `basis-full`, not a column, so the label
+  and arrow stay together under the glyph. ⚠️ `x-card` is in `CARD_TYPES` now: it draws no surface of its
+  own, so without that line a placed Custom Card landed straight on the page ground.
+  Four faults found on the way, all pre-existing: `setText` resolved the collection key as the literal
+  `items` (the key List and Accordion happen to use) so an inline edit of any other collection was written
+  into an array that widget does not have; it also read the RAW config store, where an untouched widget
+  holds nothing, so the first edit mapped over `[]` and wrote it back — **typing in a link emptied the
+  card**; the drawer found an item by `id` when seeded items carry none, so it fell back to the WIDGET's
+  config and read and wrote the item's fields one level up; and a per-item icon cannot live in the shared
+  `icons` store, which is keyed by widget — six links would have shared one glyph.
+- **Support Portal — a card block's GAP follows its PRESET (17 Sep 2026).** Action cards, KPI tiles,
+  Favourite / Most Used Services and My Assets / My CIs all take the same **pair** every band and section
+  uses, and each half appears only when the arrangement HAS that axis: all-in-one-row offers columns,
+  Stacked offers rows, 2- and 3-per-row offer both once there are more cards than fit a line. It was one
+  number applied as the CSS `gap` shorthand with a between-columns glyph on it whatever the preset had
+  done. `tileShape(owner)` in the builder answers the two questions that decide it — how many cards, and
+  how many across — per block, because the count lives somewhere different in each (the quick row's own
+  cards, a KPI's items, four service tiles, the hard four `RecordTiles` draws whatever `show` says).
+  My Assets and My CIs had NO gap control at all and a hard `gap-2.5`. ⚠️ `rest` is PER BLOCK: seeding
+  every one from 12 put 12 in a field over a page drawing 10. ⚠️ Group **'Columns', not 'Layout'** —
+  `DROP_GROUPS` removes every Layout field from every panel with ONE exception carved out BY CONTROL TYPE
+  for the preset picker, so a Gap declared beside it renders nowhere and the panel looks untouched.
+  ⚠️ `stylesRef`: §7.8 keeps a block's column count in the STYLE store and `cfgFor` has to read it, but
+  putting `styles` in that callback's deps would rebuild on every colour drag something the whole canvas
+  depends on. New writes go to `colGap` / `rowGap`, the keys the canvas's pink strips write, so the field
+  and the strips are one setting; `tileGap` is still read as the fallback for both axes.
+- **Support Portal — TITLE placement is on every card, and a lone last card spans (17 Sep 2026).**
+  My Assets, My CIs and the Custom Data Widget gained the Title row; the first two were the only cards
+  whose heading could not be moved out of their box. ⚠️ `LiveCard` needed its own copy of the outside
+  shape — it draws its own heading rather than going through `CardShell`, so "Above the card" took its
+  surface off (`Sel` withholds it on the promise the widget paints it back) and put nothing in its place.
+  The KPI display is excluded: there the "title" is the caption under a number. **A card left ALONE on the
+  last row takes the whole width** — three across and a fourth spanning all three — in the preset tile
+  AND in the KPI and action grids; `RecordTiles` already did this and its comment already pointed at the
+  tile, which was drawing a small box.
+- **Support Portal — the COLUMN-PRESET tiles are plain grey boxes (17 Sep 2026).** The banner's
+  arrangement tiles already draw every section that is not the words as a grey box, and the note there
+  says why: a tile answers ONE question. These ask the same one — how are the cards arranged — and were
+  answering a second nobody asked at a size that could not hold it (at three across a card is 17px wide,
+  and a badge with a label line inside a bordered box at 17px is three marks fighting over a space that
+  holds one). ⚠️ A ONE-ROW preset is the SHORTEST, not the tallest: handed the full tile height it drew
+  four portrait bars, the exact "tall vertical bars" its own note warns about. `MiniCard`, `KpiCardArt`,
+  `ActionCardArt` and `CardSkeleton` were deleted and `TilePresetPicker` lost its `kind` prop with them.
+- **Support Portal — the six data cards' CONTENT and row shapes (17 Sep 2026, from reference images).**
+  Page layout untouched; only what the cards say and the shape of one row. **My Open Requests** — four
+  rows in the two-line `meta` shape (id + subject, timestamp under, status holding the right edge), badge
+  8. **Pending Approvals** — the id and the subject stop sharing a pill (an id is a thing you copy, a
+  subject a thing you read), the reason joins the subject after a middot, and the three actions moved onto
+  the FIRST line beside what they act on. **Most Read Knowledge** — its full name, four articles, one-word
+  tags holding the right edge, badge 412. **Announcements** — the tile is the MONTH over the DAY
+  (`postedParts` returns `{ month, date }`), three notices. **My Assets / My CIs** — badges 8 and 4.
+  ⚠️ **Dividers are FULL WIDTH**: `-mx-4` on `ListBody` and `px-4` back on each `Row` — inside the card's
+  padding a rule stopped 16px short at both ends, and a rule between two rows is only a rule if it reaches
+  the edges of the thing it divides. ⚠️ **ONE date format on the page**, `Aug 12, 10:09 AM`, including on
+  the approvals row where the reference wrote `11 Aug`. ⚠️ The badges count **totals**
+  (`PORTAL_OPEN_REQUEST_TOTAL`, `PORTAL_ARTICLE_TOTAL`, `MY_ASSET_TOTAL`, and `RecordTiles`' `total` prop),
+  not the rows in a mock array — which made a badge a fact about the fixture and contradicted the
+  "View all" beside it.
+- **Support Portal — the RAIL's first card ends where the row beside it ends (17 Sep 2026).** The work
+  band is two columns laid out by different mechanisms — the main region is a grid whose rows size to
+  their content, the rail a flex column — so nothing lined up the card at the top of one with the cards at
+  the top of the other, and Announcements stopped 33px short of Requests. The rail's first card is pinned
+  to the main region's first row and stops growing (`flex: 0 0 auto`); the cards under it absorb the
+  slack. ⚠️ Reached by walking the DOM from a REF on the card, never
+  `querySelector('[data-node="work-main"]')` — `Sel` renders `data-node` only while the canvas is editable.
+  ⚠️ It measures the CARDS in the top row, not the grid's own track: the track read 332.97 where the card
+  in it measured 334.19. ⚠️ A **0.4px deadband**, because this chases its own tail — pinning the card
+  changes the rail's height, the band's, and what the grid's auto rows take. A wider band swallowed the
+  correction it was meant to apply: at 1.5px it kept a value 1.22px wrong, which is how the first attempt
+  looked stable and misaligned at once. Verified 0.14px apart across four samples a second apart.
+
+- **Support Portal — an action card's CORNER ARROW is a glyph picker, not three buttons (18 Sep 2026).**
+  The Arrow group on an action card is **Corner arrow** (switch) → **Icon** → **Icon colour**. The
+  three `arrowGlyph` segmented buttons are gone: a corner mark is an arrow on most portals and a plus
+  or a chevron on the rest, and three fixed options could only ever offer the first three answers —
+  while teaching a second way of choosing an icon in a panel that already has one two accordions
+  above. ⚠️ `ARROW_GROUP` (six marks) lives in `PortalIconPicker` but is deliberately **NOT in
+  `ICON_GROUPS`** — a service catalogue has no use for six arrows — and is offered only to a field
+  that asks for it through the new `lead` prop; it IS in the `ALL` lookup, or `iconNode` could not
+  draw a key you had just picked. The field is the exported **`IconGlyphField`** with `iconsOnly`
+  (no Image tab: the mark takes a COLOUR and a photograph cannot be recoloured) and
+  `clearable={false}` (the switch above is the one answer to "is there a mark?" — a second way to
+  clear it is how a switch ends up reading *on* over a card with nothing on it). ⚠️ `arrowColor` is
+  **unstored until it is picked**: unset, the mark keeps taking the card's TITLE colour, which is
+  right on a glass tile and on a white card alike. `WidgetField.rest` is the new, general way a
+  colour control states the colour the page is ACTUALLY painting meanwhile (`#98A6B6` here) — the
+  same trap the action card's `bg` default records. ⚠️ `PanelAccordion.bodyClass` is also new:
+  **a group whose first row is a SWITCH takes `pt-2`**, because `ToggleRow` owns its own spacing
+  (`first:mt-0`) and collapses flush against the group title. Arrow and Shadow both carry it, so it
+  is one rule rather than a number chosen per panel.
+- **Support Portal — ADDING a banner asks the shape first (`PortalBannerStart.tsx`, 18 Sep 2026 — stage 1 of 3).**
+  `addElement('x-banner')` no longer just un-removes the band. It opens a centred two-step dialog:
+  **Horizontal / Vertical**, then that orientation's layouts with an Industry filter and
+  **Start from scratch** as the first tile. ⚠️ Orientation cannot be a row inside a list of banners —
+  a vertical banner turns the whole page into two columns and moves every section beside it, so it is
+  a fact about the PAGE, and it decides which banners there are to show. The two shape cards are
+  drawn as whole PAGES for the same reason. ⚠️ A dialog, against this builder's habit: it appears
+  once, when there is no banner at all, and the choice is made from pictures that do not fit a 340px
+  panel. ⚠️ The tiles are the Banners rail panel's OWN (`BannerThumb`, `BannerScratchThumb`,
+  `BannerTile`, `BannerOrientation`, all now exported from `PortalBannersPanel`) — one shelf, so the
+  picker you add from and the picker you swap from cannot drift. ⚠️ **Start from scratch is a
+  `BannerTemplate`** (`scratchBanner(orientation)` + `SCRATCH_BANNER_ID` in `portalBannerTemplates`),
+  applied through the SAME `applyBannerTemplate` — which now takes a template as well as an id — so
+  the blank banner gets the key-wiping, the widget swap, the `quickFor` column hand-back and the
+  near-white search hairline that hand-written writes would have missed. Its id is not in
+  `BANNER_TEMPLATES`, so the Banners panel correctly marks no tile active. It sets no
+  `heading`/`sub`, falling through to the page's own words, and travels with `heroInk: 'dark'`.
+  ⚠️ `startBanner` calls **`select`**, not `setSelectedId` — only `select` stands the rail's Widgets
+  list down, so the panel answers with the banner's settings instead of leaving the library up over
+  the thing it just added. ⚠️ The BLANK page branch in `SupportPortalPreview` now uses the same
+  two-column `railRowRef` row the full page uses (`contents` when the banner is a top band), or a
+  blank page could hold a vertical banner in its config and still draw it across the top; the right
+  column carries its own "This column is the page" invitation, because with a banner present the
+  tall empty state is suppressed and a whole empty column offering only a 12px seam is an
+  instruction nobody can find. Verified: banner 420 × 806px, `position: sticky`, in an 846px pane.
+  **Still to build — stage 2:** width drag on the banner's inner edge, and right-column section
+  polish. **Stage 3:** drag the banner between left and right (decided: those two only — a centre
+  banner means two narrow separately-scrolling columns).
+- **Support Portal — the vertical banner PINS IN PREVIEW ONLY, and its column is visibly spoken for
+  (18 Sep 2026).** ⚠️ `heroPinned` is the SETTING (`pageCfg.heroSticky`), `heroSticky` is whether it
+  is APPLIED — and it is applied only while `!enabled`, i.e. in Preview and on the published portal.
+  In the editor the banner scrolls with the page. The reason is the one that made the first attempt
+  wrong: a sticky screen-tall banner covers its own column at every scroll position, so the canvas
+  hid the one thing the admin has to see — that the space under the banner is the banner's and
+  cannot take a widget. (This REPLACES the earlier "show the restriction only while dragging"
+  decision, which existed only because the strip could never be seen while the banner was pinned.)
+  ⚠️ `heroReserved = heroPinned && enabled` draws **`BannerReserved`** under the banner: a hatched
+  strip with a lock and "Banner column", plus a Radix tooltip saying the banner will stand over this
+  space on the live portal. Its `onDragOver` deliberately does NOT `preventDefault` — accepting the
+  dragover is what makes a drop possible, so refusing it is what makes the cursor read no-drop — and
+  it `stopPropagation`s so the columns and seams behind it cannot accept the drop on its behalf.
+  ⚠️ The banner and the strip are ONE column (`heroColumn`, built once and used by both page
+  branches), so the row still divides in two and the strip cannot end up a different width from the
+  banner. ⚠️ A vertical banner with `heroSticky` OFF (Atrium) is unchanged: it is a column the full
+  height of the page by design, so it keeps `self-stretch` and has no space under it to reserve.
+  Measured: editor `position: relative`, banner top 68 after a 900px scroll, hatch visible; Preview
+  wrapper `position: sticky`, band 846px in an 846px pane.
+- **Support Portal — a BLANK page's content column IS the full page's content column (18 Sep 2026).**
+  Once a from-scratch page has anything on it, its column takes the same class string the non-blank
+  page uses — `flex flex-col pb-8` — so the two cannot drift. The wrapper used to add `px-6 py-8` on
+  top of every section's own `SECTION_PAD`, which meant the SAME widget in the SAME kind of section
+  sat inset on a from-scratch page and ran end to end on a template page: one page, two answers, and
+  a gap with no control behind it. The rule is the one the full page has always stated — *"a SECTION
+  runs from the page's left edge to its right edge, so each one carries its own inset"*. ⚠️ `pb-8`
+  survives because that is breathing room at the FOOT of the page, not an inset. ⚠️ The empty state
+  keeps its own padding — there is no section there yet to carry any. Measured, all three identical:
+  a scratch page's section 81 → 1062, a template page's section 81 → 1062, the page itself 81 → 1062;
+  and beside a vertical banner, 501 (the banner's right edge) → 1062.
+- **Support Portal — ADD SEVERAL AT ONCE, from-scratch pages only (18 Sep 2026).** A dashed row under
+  the Widgets search — *"Add several at once · each in its own row"* — puts the palette into a pick
+  mode: every addable row grows a circle, ticking one fills it with **its number**, and a sticky
+  footer offers `Add N widgets` / `Cancel`. Each pick lands as its own full-width section, in the
+  order picked. ⚠️ The badge carries a NUMBER, not a tick: several widgets landing together arrive in
+  an order, and the order is the one thing a tick cannot tell you. ⚠️ ONE `setSections`
+  (`addElements` in the builder), never N calls to `dropAtSeam` — N would be N toasts, N selections
+  and N renders of what is one action, and the last selection would close the library the admin is
+  still working in. ⚠️ NOTHING is selected afterwards: the admin picked several, so there is no one
+  thing they are now editing. ⚠️ The mode EXITS after the batch — it changes what a click does, and a
+  mode still running with no task left is how a later click lands somewhere nobody meant. ⚠️ Gated by
+  a PROP (`onAddMany`, passed only when `isBlank`), never inferred inside the panel: a page started
+  from a template already has its shape, so "give me six rows of cards" is an answer to a question
+  only a blank page asks. Verified: 4 sections in the picked order on a scratch page, and the row
+  absent on a template page. ⚠️ **`addElements` must be declared BELOW `blockOrder`/`removed`** — a
+  `useCallback` evaluates its dependency array during render, so beside `dropAtSeam` (where it
+  belongs by subject) it was a temporal-dead-zone crash that blanked the whole builder while
+  `npm run build` stayed green. A `pageerror` listener in the Playwright script is what caught it.
+- **Figma MCP is connected for this project** (added 25 Sep 2026 with
+  `claude mcp add --transport http figma https://mcp.figma.com/mcp`, stored in the `.claude-pro` profile's
+  local config). ⚠️ Figma's MCP tools need **EDITOR access to the file** — view access returns "you don't have
+  edit access". If a shared design link fails that way, ask for editor access or a "Duplicate to your drafts"
+  copy, or work from a pasted screenshot.
+- ⚠️ **You CAN drive the real app headlessly — this is how to verify UI work here.** `playwright-core`
+  is already in the npx cache and Chrome is installed, so a plain node script can open the builder,
+  click through it and screenshot every step:
+  ```js
+  import { chromium } from 'file:///C:/Users/Zeni%20Chakalasiya/AppData/Local/npm-cache/_npx/9833c18b2d85bc59/node_modules/playwright-core/index.mjs';
+  const browser = await chromium.launch({ channel: 'chrome', headless: true });
+  ```
+  ⚠️ The import must be a **`file://` URL** (Windows absolute paths are rejected by the ESM loader).
+  Reaching a blank builder page: `#/admin/support-portal` → *Create support portal* → fill
+  *Support Portal Name* + *Support Portal URL* + the first Company option → *Save* → *Start from
+  scratch*. Listening for `pageerror` is what caught the `setTemplateCategory` ReferenceError.
+  ⚠️ **A browser may be serving a DIFFERENT copy of this project.** The Claude-in-Chrome browser
+  reached a dev server whose project has no `src/app/routes.ts` at all — i.e. the old checkout at
+  `D:\Motadata\ServiceOps-Ticket-Detail--main_Final\ServiceOps-Ticket-Detail--main`, not this one.
+  The tell is the tab title: this build writes `"<Module> · Motadata ServiceOps"`, the old one says
+  `"Ticket Listing & Full Detail page"`. Check with `curl` from the project folder before concluding
+  a change did not work.
+
+- **Support Portal — ONE gradient editor, for the banner's colour and for the image's colour layer
+  (19 Sep 2026).** The two used to ask for a gradient in different languages: the layer took a type,
+  an angle and any number of stops, while the banner's own fill took a nine-tile "Strongest at" grid
+  and exactly two colours. Same value, two vocabularies — so what you could express depended on which
+  tab you were in, and nothing learned in one carried to the other. **`GradientEditor`**
+  (`PortalBannerTools`) is now that editor, controlled over a `LayerGradient`, used by
+  `OverlayLayerEditor` AND `BannerFillEditor` — which means the panel field and the canvas toolbar's
+  colour popup both get it, since they render the same component. ⚠️ The banner stores
+  **`bannerGradient`**, read through **`bannerGradientOf(cfg)`**, which falls back to the legacy
+  `colorSide` / `bannerColor` / `bannerColor2` exactly as `layerGradientOf` does for the layer — all
+  29 templates and every page already built carry those keys, so nothing repaints until someone
+  edits it, and nothing is migrated on load. ⚠️ `bannerColor` is kept in step with the FIRST stop: it
+  paints under the gradient (so a stop with opacity has something honest behind it), it is what the
+  Solid tab shows if you switch back, and the template thumbnails read it to decide whether a banner
+  is dark. ⚠️ `bannerGradient` is in `TEMPLATE_HERO_KEYS`, or applying a template would leave the
+  previous banner's gradient under the new one's colours. ⚠️ The toolbar popup went 240px → 320px
+  with a scroll: the editor is four controls over a list of stops, and at 240 the type select read
+  "L" and every stop colour read "#…". The colour picker it opens is portalled to the body, so the
+  scroll box cannot clip it. `SideGrid` / `sideGradient` stay — the colour LAYER's legacy
+  `overlaySide` field still uses them.
+
+- **Support Portal — CHANGING the banner's layout lives in the banner's own panel (21 Sep 2026).**
+  **Banner layout** is the first row of the Banner group, above Height — the slot the retired
+  `bannerLayout` picker had, for the reason written there: a control that reframes everything under
+  it is read too late at the bottom. It DRAWS the layout the banner is on (`BannerMiniPreview` in
+  `PortalBannersPanel` — the real gallery thumbnail, scaled into a fixed box, never a hand-made
+  miniature that could drift from the tiles it sits beside), names it, and the link says which shape
+  it will offer: *Change horizontal layout* / *Change vertical layout*. ⚠️ It opens the SAME dialog
+  the add flow uses, through a new `lockTo` prop — one component, because a separate edit picker is
+  how the add shelf and the change shelf end up holding different banners. In that mode the dialog
+  skips the shape step, drops the back arrow (there is nothing to go back to), ticks the layout the
+  banner is on, and carries one line saying where the OTHER shape lives, since the rail keeps both
+  and a picker that silently drops half the catalogue reads as a catalogue that shrank. ⚠️ The shape
+  is read from the PAGE (`heroPlacement`, seeded to the panel as `__vertical`), not from a second
+  copy of the answer, so the picker cannot disagree with what is on screen.
+  ⚠️ **In edit mode the shape's one-line description is DROPPED** (25 Sep 2026). It belongs to the ADD
+  flow, where the shape IS the choice being made and the words are how you tell a band across the top
+  from a column beside the page before you have seen either. Reached from the Banner layout field you are
+  changing the design of a banner you already have: the shape is settled, the heading has named it, and a
+  sentence describing what is on screen behind the dialog is a line to read past every time. The "For the
+  other shape, open Banners in the rail" line STAYS — that one carries something the reader cannot see.
+  ⚠️ The two-step
+  Horizontal/Vertical dialog is still **first-add only** — `bannerStart` is one state
+  (`'add' | 'edit' | null`) rather than two booleans that could both be true — and deleting the
+  banner and adding it again brings the shape question back. Verified in a browser across all three
+  starts: a template banner, a vertical one, and a scratch banner (which reads "Start from scratch"
+  and ticks the scratch tile).
+
+- **Support Portal — the banner tiles are PHOTOGRAPHS now, and eight banners are offered (21 Sep 2026).**
+  Every tile used to be DRAWN from its template's own config, on the rule that a drawing cannot
+  promise a banner the template does not build. The rule was right and the result was a grid of grey
+  bars — the same shapes in different colours on all twenty-five, which is the one thing a picker of
+  banners must not be. **`scripts/capture-banners.mjs`** drives the real builder (playwright-core from
+  the npx cache), applies each offered banner, screenshots the band into `public/banner-shots/<id>.png`
+  and writes the generated **`bannerShots.ts`** — a `BANNER_SHOT_RATIO` map the tiles read while they
+  render, which is why it is a module and not a JSON file fetched at runtime. ⚠️ They are SNAPSHOTS:
+  edit a template and re-run that script, or the tile keeps the old design. ⚠️ The chrome is hidden
+  FOR THE SHOT ONLY — hiding it for the whole run also hid the Delete button, so the banner was never
+  cleared between shapes and every later shot was of the wrong banner. ⚠️ The picture is CONTAINED in
+  a fixed box, never cropped: the arrangement ACROSS a banner is what tells one from another, and
+  sizing each tile to its own proportion put every row of three on a different baseline. ⚠️ A VERTICAL
+  tile keeps a minimal page skeleton beside the column — otherwise it is a coloured rectangle, and the
+  one thing it has to say is that the banner stands beside the page. ⚠️ The seventeen withheld
+  templates have no shot, so the DRAWING stays as the fallback (`BannerMiniPreview` draws any id a
+  page might be carrying). **Eight horizontal banners are offered**, one per arrangement
+  (`featured: true` + `visibleBannerTemplates()`); the rest stay in `BANNER_TEMPLATES` because a page
+  built on one resolves its name and thumbnail through there. The Industry filter went with the trim:
+  over eight tiles, none of them labelled with an industry, it could only hide banners — and four of
+  the six industries have no banner among the eight, so it could empty the grid. Same shelf in the
+  rail panel and in the add/change dialog, and the tiles carry a name and nothing else.
+- **Support Portal — one Action Card and one KPI, and they GATHER (21 Sep 2026).** The **Action cards**
+  and **KPI tiles** BLOCKS are hidden from the palette; the single **Action Card** and **KPI** are back
+  in it. A block that holds N cards and a card you add N times are two answers to one question, and
+  the block forced a decision — how many, in what column count — before you had seen one on the page.
+  ⚠️ `GATHERING` in `SupportPortalBuilder`: adding one of those two lands it BESIDE the last one of
+  the same type, in that section, so a row builds itself. Only as a FALLBACK — an explicit aim (a
+  selected column, a drop, a "+") has already returned — and the four-column cap is checked BEFORE
+  trying, because `dropBeside` refuses a fifth with a toast and the click would otherwise do nothing.
+  ⚠️ Both blocks STAY in the catalogue: the banner templates place them, and the banner's own "+"
+  offers them through `BANNER_SIDE_WIDGETS`, which renders its own list and bypasses the `hidden` flag.
+  ⚠️ The Edit-details dialog now matches the create dialog's width (1240px) — they ask the identical
+  five questions, and a narrower box made the same form read as a different, smaller one.
+
+- **Support Portal — the banner's bottom edge STOPS at 260 (21 Sep 2026).** `MIN_BANNER_H` in
+  `PortalCanvas` — the S stop the height rail offers — is the floor for the banner's south and north
+  drags, where every other element keeps the old 24px (`minHeightFor(id)`, seeded onto the drag as
+  `minH`). ⚠️ Two heights were being applied at once and only one of them had the floor: the DRAG
+  writes `styles.hero.height` onto the `Sel` wrapper, while the band inside it kept sizing from the
+  RAIL's `minHeight`. So dragging past the smallest stop shrank the outline and left the picture where
+  it was — measured before the fix, a 500px up-drag from 540 gave a 40px wrapper around a 260px band,
+  with the action cards sitting 282px up inside the banner instead of 62. Which is the second half of
+  the fix: the band's `minHeight` now takes the dragged height when there is one, so the artwork can
+  never outgrow the outline holding it. ⚠️ **The cards ride up onto the banner from their OWN top
+  grip**, never as a side effect of the banner running out of height — a banner with nowhere left to
+  shrink must stop, not start pulling the row beneath it up.
+
+- **Support Portal — the banner's "+" offers the SINGLE card and KPI, with their own icons, under the
+  button (21 Sep 2026).** Three fixes to one popup. (1) `BANNER_SIDE_WIDGETS` now names
+  `x-action-card` and `x-kpi`, not the `x-actions` / `x-kpis` BLOCKS. ⚠️ That list renders its own
+  rows and so **bypasses the catalogue's `hidden` flag** — the note on it has always said so — which
+  is how the banner went on handing out both blocks for weeks after they were withheld from the
+  palette, leaving one surface in the builder still offering a widget the rest of the product had
+  stopped believing in. The reasons are the ones that hid them: cards added one at a time can be
+  removed one at a time, and the KPI SET is what the Custom Data Widget is for. (2) A row in the
+  short list draws that element's **own icon** in the same badge the full library uses; all seven
+  carried one grey "+", so seven widgets read as seven copies of one thing and the glyph said "add",
+  which the popup already says. A container's child types are not catalogue elements, so those keep
+  the "+". (3) ⚠️ **A toolbar that sits INSIDE its element anchors to the BUTTON.** `ElementPicker`
+  places itself clear of the node it is filling, which cannot be done when the element SURROUNDS the
+  "+" (`toolbarBelow` draws the banner's bar just inside the band's top edge) — so it fell through to
+  "below the element" and opened past the banner's bottom: measured, top 449 for a button whose
+  bottom is 222, and further with every step up the height rail. Where covering is unavoidable,
+  nearness is what is left, so it opens 8px under the "+" (measured 230).
+
+- **Support Portal — CARDS GATHER ON THE BANNER, and a gathered row is ONE section (21 Sep 2026).**
+  The banner tree gained a GROUP: a branch carrying `g: true` is one set of cards, and
+  `unitsOf(tree)` — leaves, except that a group counts once — is now what the four-section cap
+  counts and what `presetsFor` arranges. ⚠️ Without it the banner had no way to say "these belong
+  together": every card was a section of its own, so four action cards filled a banner that holds
+  four sections and left no room for the words to share it with anything, and any preset scattered
+  them into separate rows. It is the banner's half of the page's GATHERING rule. Verified: four cards
+  land in one row (evenly 243px each), the row survives a preset (two columns moved all three cards
+  into the right column together), Announcements still fits afterwards, a fifth card is refused with
+  "A row holds up to 4 cards", and deleting down to one card hands the section back as a plain leaf.
+  ⚠️ **A group is ATOMIC to insert beside** — `insertBeside` aimed at one of its cards lands the new
+  item beside the WHOLE row, and `insertAtEdge` never opens one, or a section would be partly a card
+  row. ⚠️ **Every rebuild carries `g`** (prune, flat, mergeWords, replaceLeaf, flipRoot, shiftLeaf,
+  swapLeaves, removeLeaf, setBannerBoxDir): one missed call site silently dissolves the group. ⚠️ Two
+  rules keep it self-cleaning: `prune`/`removeLeaf`'s existing "a branch left holding one child
+  becomes that child" line retires a group down to its last card, and `flat` must NOT dissolve a
+  group into its parent. ⚠️ ONE constructor, key order always `d, c, g` — `activePreset` compares
+  trees with JSON.stringify, which preserves insertion order. ⚠️ `fill` places NODES, not ids, which
+  is what lets a preset move a whole row as one unit. ⚠️ `GATHERING` moved to MODULE scope: it was
+  declared 500 lines below `dropInRow`, which now reads it — safe only because a callback body runs
+  after the component has, the exact ordering the useCallback temporal-dead-zone note warns about.
+
+- **Support Portal — Contact Us puts its two lines on ONE line (22 Sep 2026).** A new Content field,
+  **Contact details** — Stacked (as before) or **One line**, which draws the phone and the email as
+  one sentence joined by a middot under the heading's hairline. A whole card spent on two short
+  values reads as an empty card, and under something else rather than beside it a contact block
+  usually wants to be a heading over a sentence. ⚠️ **One line DROPS THE ICONS**, and that is part of
+  the layout rather than a second switch: the glyphs exist to say which line is which, which is a
+  real question stacked and not one side by side — a phone number and an email address are
+  unmistakable from their own shape, the same argument that already took the WORDS "Phone" and
+  "Email" off these rows. A separate icon toggle would also permit "icon value · icon value", a
+  separator and a glyph both answering one question. ⚠️ `lineLayout: 'stacked'` is seeded in the
+  defaults — without one neither segment lights up and the control opens saying nothing about the
+  card it belongs to, the fault `titlePlace` shipped with. ⚠️ The row WRAPS rather than truncating:
+  the two values are the whole content of the card, so a narrow column dropping the email to a
+  second line still says both things where one clipped line says neither. The middot travels with
+  the value BEFORE it, so a wrapped line never opens on a separator. ⚠️ The spacing around it is
+  6px, not 8: at 8 the pair needed 306px in a 305px rail and wrapped by ONE pixel — measured 304 now,
+  and it is also closer to the reference. ⚠️ Unrelated but confirmed on the way: the pre-existing
+  TS1117 duplicate key is at **portalWidgetSpec.ts:921** (the action-card factory's `fields: [], packs: []`),
+  not line 597 as the How-to-run section still says.
+
+- **Support Portal — ONE renderer per live data card, page block and placed copy alike (22 Sep 2026).**
+  A card placed on a from-scratch page was a DIFFERENT card from the same widget on the default
+  page, because there were two implementations: the page's own (`CardShell` + `ListBody`/`Row`,
+  built up over months of row-shape work) and a simpler set in `PortalCollectionRender` that only a
+  placed element ever reached. Measured, they had drifted this far — **My Assets** came out as a
+  list of grey pills where the real card is a 2x2 tile grid with blue pills and row icons; **Pending
+  Approvals** lost its id pill, its Approve/Reject/Refer buttons and its requester line and printed
+  three plain stacked lines instead; **Most Read** was titled "Most Read" not "Most Read Knowledge"
+  and dropped the category tags; every **divider** stopped 16px short of the card's edges; and every
+  **badge** counted the rows on screen (5) rather than the records behind them (8 / 412). Now the
+  three inline bodies are `requestsBody(id)` / `approvalsBody(id)` / `knowledgeBody(id)`, the page
+  hands all five to placed elements through `PlacedBlockRenderers` — the seam the Action cards
+  block already used — and the five copies in `PortalCollectionRender` are DELETED, not left as a
+  fallback, because a dead second implementation is exactly what produced this. ⚠️ Nothing had to be
+  passed to make the ROWS match: `WIDGET_FOR_TYPE` and `WIDGET_FOR_NODE` both resolve to
+  `'my_requests'` and friends, so a placed copy already arrives with the same spec defaults (row
+  shape, rows to show, date format). ⚠️ **`cardFace(id)`** is the white box, extracted from
+  `cardInner` so both routes paint the same one: a placed card used to land on the generic
+  `Surface` (rounded-lg, its own 16px) while the page's is rounded-xl with the padding inside its
+  head and rows. The placed wrapper carries `stInner` for the same reason `cardInner` does — `Sel`
+  withholds the surface (`paintsOwnSurface`) precisely so one box paints it. ⚠️ The Record List
+  keeps its own `LiveCard` — it is admin-authored and has no page block to match — but its rules
+  now run `-mx-4` to the card's edges like every other card's. Verified by placing all five on a
+  scratch page and diffing against the default page: identical innerText, identical pill colours
+  (grey for requests/approvals/knowledge, `#EBF5FF`/`#3D8BD0` for assets/CIs), identical badge
+  totals, rules at the card's full width, and the same face (white, 14px radius, 1px `#E5E7EB`).
+
+- **Support Portal — the THEMES are the layout gallery's, and a theme's tones paint the page
+  (`portalTone.ts`, 22 Sep 2026).** The gallery themes a portal the way a designer does: one colour
+  is chosen for the banner, and everything tinted on the page is a TONE of it. That is now the
+  product's theme system. **Eight themes, one per HUE FAMILY**, curated out of the 37 layouts —
+  Clarity (blue) · Meridian (teal) · Prism Green · Study Desk (indigo) · Vault (navy) · Prism Coral
+  · Broadside (sand) · Triptych (graphite) — each carrying its palette, a type pairing and a button
+  shape, and each named for the template it came from. ⚠️ Two gallery colours were deliberately left
+  out: **amber** (Concierge `#F2A81D`) cannot be a PRIMARY at 1.85:1 on white — every link and
+  button label built from it would be unreadable, the same measurement that keeps coral off text
+  elsewhere — and Gazette's gold is an accent beside a blue, not a hue a page is built from.
+  ⚠️ **CLARITY IS UNCHANGED AND STAYS FIRST**: it is the product's blue and what every portal already
+  built is on, so swapping it for the nearest gallery blue would repaint every existing page for a
+  reason nobody asked for. Its page is #F4F6FA — the ground the product ACTUALLY has, corrected the
+  day the page's ground started reading that slot (see the page-ground bullet below); the seven
+  others bring the gallery's own ground tint. ⚠️ **`paletteOf`'s fallback index moved 4 → 0** with the list — a stale
+  index there does not throw, it silently themes an unknown palette as somebody else.
+  **The tones are COMPUTED, never authored** (`tonesOf` → `wash` / `soft` / `line` / `ink`, emitted as
+  `--portal-tone-*` on the builder's theme wrapper beside `--portal-accent`). Two reasons, the second
+  decisive: eight hand-tuned sets are eight chances to get a relationship wrong, but more than that
+  the admin can EDIT the primary — an authored set would go on painting the old hue behind the new
+  one and no control anywhere would explain why. Derived, the whole page follows the colour they are
+  dragging, live (verified: typing `#7A1FA2` over Clarity's primary moved wash, ink, the pill and
+  the asset tile in the same frame). ⚠️ Saturation is CAPPED for the tints and has a FLOOR: a wash at
+  the primary's full saturation is a coloured surface rather than a tint of white, and a nearly-grey
+  primary (Triptych) scaled down would give a wash you cannot tell from the card behind it. ⚠️ The
+  **ink is darkened UNTIL IT READS** (4.5:1 against its own wash), not set to a fixed lightness — the
+  same bar the banner's contrast guard holds text to. **What is toned:** the record ID pill, the card
+  head's icon badge, the service tile and Record List badges, the My Assets / My CIs tile fill and
+  its pill, the knowledge row's glyph, and the page ground. ⚠️ Every consumer states a FALLBACK equal
+  to the colour that block had before any of this, so a card rendered outside the theme wrapper is
+  unchanged rather than black. ⚠️ Tile and icon tones are passed as the **base** style
+  (`{...baseStyle, ...styleOf}` in `Sel`; spread before `iconBoxCss`), so a fill or icon colour the
+  admin picked still wins — a theme supplies the default, never the answer. ⚠️ **SECONDARY IS NOT
+  THEMED**, by decision: it is the status language, and an Open pill in Broadside's brown stops
+  saying "waiting". Verified identical across all eight (amber `rgb(254,243,199)` / `rgb(180,83,9)`).
+
+- **Support Portal — the PAGE'S GROUND follows the theme (22 Sep 2026).** The theme's page colour was
+  being set correctly and painted over, in two places at once, so switching a theme appeared to leave
+  the page the same blue-grey and dragging the Home-page-background picker appeared to do nothing.
+  ⚠️ **`SupportPortalPreview`'s root carried `bg-white`** and the **content column carried
+  `bg-[#F4F6FA]`** — the second is the one an admin means by "the page background", the surface
+  behind the banner and every widget. Both now read **`var(--portal-page-bg, …)`**, set by the
+  builder's theme wrapper beside `--portal-accent`, and their old hard-coded colours are the
+  FALLBACKS — so the create dialog's thumbnail, the one call site that renders the portal with no
+  theme around it, is unchanged. ⚠️ The variable is `transparent` while a page IMAGE is set: the
+  picture lives on the wrapper, so a colour on either surface would paint straight over it — which
+  is why the page background image had never been visible either. ⚠️ Both spread the variable BEFORE
+  their other styles, so `styleOf(styles, PAGE_ID)` and a hero image told to cover the whole page
+  still win. ⚠️ **Clarity's `pageBg` is `#F4F6FA`, not `#FFFFFF`** — while nothing read that slot
+  it could say white harmlessly, and the moment the ground read it, white was the value that would
+  have repainted every existing portal and left its white cards with only a hairline against the
+  page. Verified: Clarity `rgb(244,246,250)` (unchanged), Broadside `rgb(250,246,239)`, Prism Green
+  `rgb(244,249,246)`, Vault `rgb(244,246,251)`, Prism Coral `rgb(252,247,246)`, and typing
+  `#DCE8F5` into the picker → `rgb(220,232,245)` in the same frame.
+
+- **Support Portal — the Action Card and the KPI belong to the BANNER (23 Sep 2026).** Both are
+  `hidden` from the palette; the banner's "+" still offers them, because that list renders its own
+  rows and does not read the flag. An action card is one of the product's four destinations and a
+  KPI is a counter beside the words — neither is a block somebody drops into the middle of a page
+  on its own. **"Action Card" on the banner means THE SET**: the four move there as four
+  individually selectable cards in ONE group row (`appendGroup`), laid out as columns inside it,
+  and the page's Quick Actions row stands down. ⚠️ Each carries **`fromQuick`**, the id of the
+  card it IS — that is what `actionsMoved` reads (it counted only the `x-actions` BLOCK before, so
+  the page went on drawing the row underneath and every card appeared twice), and it is what keeps
+  each card's title, subtitle, icon and destination its own. ⚠️ Seeded from the **RESOLVED** config
+  (`cfgFor(quickId)`), not the raw store: an untouched card keeps everything in its spec's
+  defaults, so a copy of the raw store would be four blank cards. ⚠️ Nothing is selected afterwards —
+  you placed a set, and selecting the first of four says the opposite. **KPI** arrives as one tile in
+  its own section, and **Duplicate puts the copy in that same section** (`addToGroup`, which makes
+  the group when the original is alone). ⚠️ That needed a BANNER branch in `duplicateNode`:
+  `placedParent` only knows about section boxes, so a banner widget fell past every branch and
+  Duplicate did nothing at all — the one route the KPI has to a second tile. ⚠️ `append` in
+  `portalBannerLayout` takes a NODE now, not an id, which is what lets a set be appended as one row.
+  ⚠️ **Testing trap, cost an hour:** reading a card's text with `innerText` on its `[data-node]`
+  wrapper picks up any popover open inside it — an icon picker left open by an earlier click made a
+  correct card report itself as "Action Card" and looked exactly like lost config. Read the title's
+  OWN node (`el-N-title`), and check a screenshot before believing a text diff.
+
+- **Support Portal — the palette row's hover "+" (23 Sep 2026).** Hovering any widget in the Widgets
+  library reveals a **+** at its right-hand end; clicking it adds that widget and **leaves the
+  library open**, so the next one is one more click. It REPLACED the "Add several at once" mode
+  rather than joining it — that mode's entire value was staying in the library across several adds,
+  and the "+" delivers it without a mode to enter, numbered circles to tick and a footer to commit.
+  Two ways of doing one thing, one of them with its own state to enter and leave, is how a click
+  lands somewhere nobody meant. `addElements` in the builder went with it (its only caller was the
+  `onAddMany` prop), and so did the `isBlank` gate — the "+" is on **every** page, because it is
+  the affordance for adding a widget and a template page adds widgets too.
+  ⚠️ **The "+" and the row do NOT do the same thing, and the difference is the panel.** Adding a
+  widget SELECTS it, and selecting takes the panel over with that widget's settings — so a row click
+  adds and opens what it added (one widget added deliberately is usually one you are about to edit),
+  while the "+" passes `keepOpen` and the builder puts the panel straight back to the library. It
+  does that with `setActive('add')` AFTER `addElement` in the same batch, which wins over the
+  `setActive(null)` that `select()` does on the way past. The new element is still selected, so the
+  canvas outline says what landed.
+  ⚠️ **"Each new widget row-wise" needs no new code** — `addElement` already ends at
+  `dropAtSeam(last, type)`, and consecutive "+" clicks each land in their own full-width section
+  because the previous add left a ONE-element section selected, which has no free column to fall
+  into. An aimed add (an empty column selected, a drop) still fills what you aimed at.
+  ⚠️ **The row is a `<div role="button">`, not a `<button>`** — a button inside a button is invalid
+  markup that browsers silently repair by pulling the inner one out. Enter and Space are wired by
+  hand for the same reason, and the "+" `stopPropagation`s or one press would add the widget twice.
+  ⚠️ The tick-and-disable treatment is UNCHANGED and still comes from `placedPredefined` (Data and
+  Actions, plus any element carrying an explicit `node`); the "+" is simply withheld from a row
+  that already carries a tick — the two answer the same question and share one slot.
+  ⚠️ **Testing trap:** "Search for elements" is a PLACEHOLDER, so `innerText` never contains it — a
+  probe testing "is the library open" that way reports `false` on a working panel. Match the input.
+
+- **Support Portal — the banner's "+" asks HOW MANY SECTIONS, not which widget (24 Sep 2026).** The
+  toolbar's Plus opens a three-tile picker — **2 · 3 · 4 sections** — and picking one lays the banner
+  out at its default arrangement for that count with an **empty cell** in every section nobody has
+  filled; each cell then carries the existing "Add to banner" popup (`BannerSlot`, the same
+  `BANNER_SIDE_WIDGETS` list). Choosing a widget first meant choosing it before there was anywhere for
+  it to go: it landed wherever `normalizeTree`'s append rule put it, the arrangement set changed
+  underneath it, and the layout had to be corrected afterwards. Same list, one click later, in the
+  order the admin is actually working in. The arrangement tiles are untouched and stay on the bar.
+  ⚠️ **The count is every section INCLUDING the words**, so it runs 2–4 and tops out at
+  `MAX_BANNER_SECTIONS` — the words alone are one section, two widgets beside them make three.
+  Counting only the widgets would put a "4" on a control whose own cap is four and mean five.
+  ⚠️ **GOING DOWN works, and it asks only when it has to (24 Sep 2026).** A lower count used to be
+  disabled outright — the right answer to "delete something without asking" and the wrong answer to the
+  question, because two of the cases destroy nothing. **Empty cells go FIRST and silently**: a `bn-slot`
+  holds nothing, so a banner laid out at four and never filled goes back to two in one click, and asking
+  permission to delete nothing is what teaches people to dismiss dialogs. Only when FILLED sections must
+  go does the popup swap to a **"Remove N sections"** step listing them by name with checkboxes, a Cancel
+  and a red Remove. `setBannerSections(n, remove?)` takes the chosen ids and **does nothing without
+  enough of them** — it never picks a filled section on its own. The **Text & Search section is never a
+  candidate**, in the panel or the builder: a count control is not where a banner loses its words.
+  ⚠️ Once enough rows are picked the REST go quiet rather than the admin picking one too many and being
+  told afterwards; the picked ones stay live, so unpicking re-opens the list.
+  ⚠️ **ONE pass over both stores** (`rowExtras.hero` and the tree) — a loop calling `deleteNode` would be
+  N toasts, N renders and N reads of a tree being rewritten underneath it.
+  ⚠️ **The selection is cleared only when what was selected is what went.** A blanket `select(null)`
+  deselected the BANNER, whose toolbar is holding the popup you are working in, so the popup vanished
+  mid-edit and the count could not be followed by an arrangement.
+  ⚠️ Going down leaves the survivors arranged as they are (`removeLeaf`/`removeBranch` collapse
+  single-child branches); only going UP applies `defaultTreeFor`, because new empty cells have to land
+  somewhere. ⚠️ A row is named by the canvas's own `nodeById` (`nameOf` prop), so it reads as the outline
+  does — which means an `x-card` reads "Custom Card" here though the banner's "+" offered it as "Quick
+  links". Agreeing with the canvas beats agreeing with the add-picker; see the `x-card` note below.
+  ⚠️ **Nothing is selected afterwards** — the admin asked for a shape, not for one of its cells; the
+  cells are what to click next and they say so.
+  ⚠️ **`defaultTreeFor` (portalBannerLayout) is ONE FAMILY**: `two-cols` → `col-two-rows` →
+  `col-three-rows` — the words keep the left column and the widgets stack beside them at every count.
+  A default that moved the words each time you added a section would rearrange the page on the admin's
+  behalf, which is what the arrangement tiles are for. `col-three-rows` (`R(0, C(1,2,3))`) was ADDED to
+  `PRESET_SHAPES[4]` for this: a default outside the preset set is a layout with no tile lit and no way
+  back to it.
+  ⚠️ `ItemSkeleton` treats the BARE id `bn-slot` as an empty cell — the tiles preview a banner nobody
+  has built, so there is no placed element for `placedType` to look up.
+  ⚠️ Related, same pass: **Announcements no longer arrives on the banner as the image carousel.**
+  `seedBannerItem`'s `display: 'image'` outlived the card type it named — "Image with carousel" was
+  withdrawn from the Card-type tiles, so it landed in a shape nothing could offer and nothing could
+  change it to. It takes the spec's default (`regular`) like every other Announcements.
+
+- **Support Portal — the toolbar's TOOLTIP, its NAMED group, and two lucide swaps (24 Sep 2026).**
+  ⚠️ **The tooltip was pointing at the wrong button, on every bar.** `useToolbarTip` measured
+  `el.offsetLeft`, which is relative to the nearest POSITIONED ancestor — and every control that opens
+  a popup sits in a `relative` wrapper of its own, so all of those reported 0 and their tip appeared
+  under the FIRST control on the bar however far along the row you were pointing. It measures the
+  button's rect against the BAR's rect now, and carries a **caret**, which is what ties the words to
+  one of nine same-sized glyphs. It is **instant** by design (against the product's 700ms Radix
+  default): that default is right for a tooltip repeating a label you can already read, and on a bar
+  where every control is a glyph the tooltip IS the label. Below the bar by default, flipping above
+  only when the viewport floor is nearer than the tip is tall. ⚠️ ONE `ToolbarTip` component now — the
+  markup was copy-pasted at four call sites and `ElementToolbar` had a fifth, drifted copy of the hook
+  itself, which is why the fault was invisible from any one of them.
+  ⚠️ **Border is lucide `SquareSquare` and Corner radius is lucide `SquareRoundCorner`** — the drawn
+  `StrokeGlyph` (an even-odd ring) and `RadiusGlyph` (a bare elbow) are deleted. Three of the four are
+  lucide's own now; only the shadow halo is still drawn, because the set has no glyph for it.
+  ⚠️ **Every WORD on the bar is one fenced group** (`named` in `ElementToolbar`, class `textBtn`):
+  Button style · Add item (Accordion + FAQ) · Add caption (Image) · External link · **Icon**. They were
+  scattered through the glyph run, so a word turned up mid-row with a glyph either side and read as a
+  label ON the bar rather than as one of its buttons. Two kinds live there and keep their own colours —
+  a **blue** one with a plus DOES something, a **neutral** one with a chevron OPENS something.
+  ⚠️ **The Icon badge's control is a WORD, not a glyph, and it is on the CARD as well as the badge.**
+  A paint bucket, a corner and a halo each picture what they change; "Icon" pictures nothing — it is a
+  SCOPE ("the settings of the badge inside this card"), and every drawing of it came out as a square
+  with something in it, which at 15px is the Border glyph and the Shadow glyph with a different
+  filling. An action card (`quick-*` or a placed `x-action-card`) now offers it and writes
+  `` `${id}-icon` ``, so the badge — a 16px target inside a card — no longer has to be found by
+  clicking it. `IconBadgeGlyph` is deleted.
+  ⚠️ **A data card's `-tile` keeps its Icon group in the PANEL** (`DATA_TILE_SPEC`, `G6` restored). That
+  id is the SAME on every tile in the block, which is why `Sel` draws no toolbar, handles or name chip
+  for it at all — so it has no bar to carry the control, and the 23 Sep move to the toolbar had left
+  those badges with no icon settings anywhere. Testing `-tile$` in `iconTarget` was dead code that read
+  like coverage; it is gone.
+
+- **Support Portal — a THEME CARD is its colour and its type, and nothing else (24 Sep 2026).**
+  ⚠️ **The BUTTON left the card.** It was there because a style decides a button shape as well as a
+  typeface — true, and not what anybody reads the card for. Eight cards each carrying a control-shaped
+  thing that cannot be pressed is eight false affordances in a picker, and the shape it reported is the
+  smallest of the three differences between two themes. `buttonId` is still applied by `applyStyle`.
+  ⚠️ **The NOTE left with it.** A line of prose under every card turned a picker you scan into a page you
+  read and doubled each row's height. The name says which theme it is and the card shows what it looks
+  like; a sentence explaining the choice is what you need when you cannot see the choice. `note` stays on
+  `THEME_STYLES` — nothing renders it.
+  ⚠️ **COLOUR IS BACK, reversing the note that used to sit on `StylePreview`** ("no swatch strip — the
+  palette section below is the colour authority"). That argument holds against a STRIP of the palette's
+  seventeen colours; it does not hold against the ONE colour a theme is built from, which is the first
+  thing anybody tells two themes apart by. A solid 3px rail in the primary beside the accent wash — one
+  colour, not a row of chips, so the card says "this theme is teal" rather than "here is a palette to
+  edit". Verified: 8 cards, 109px each, no Button, no note.
+
+- **Support Portal — the banner's layout is ONE popup on ONE icon (`BannerLayoutPanel`, 24 Sep 2026).**
+  The `+` and the Arrangement icon were two buttons for two halves of one decision: you pressed the `+`,
+  picked a count from a grid of pictures, watched the popup close, then pressed the icon beside it to find
+  a SECOND grid of pictures for the count you had just chosen. They are one popup now — **Sections** on
+  top, **Arrangement** for that count directly under it — opened from the presets icon; the `+` is gone.
+  ⚠️ **The count is a NUMERIC TAB ROW — Default · 2 · 3 · 4 — and it has now been both, twice.** It was
+  a segmented row, went to picture tiles because a number cannot show what the banner will look like,
+  and is a row again. The reason the tiles existed has gone: the Arrangement grid below now draws a tile
+  even at ONE section, so a picture of the banner is always on screen and the count can go back to being
+  the small question it is. The focus belongs on the arrangements.
+  ⚠️ **DEFAULT is one section — the words alone** — which the numbers could not say and which is the way
+  BACK: every other value adds cells, so without it a banner taken to four had no route to the shape it
+  starts in short of deleting sections by hand. `setBannerSections` clamps at 1, not 2.
+  ⚠️ **The Arrangement block ALWAYS draws.** Below two sections it shows ONE tile — the words and the
+  search, lit, because that IS the arrangement — where it used to vanish entirely on the argument that
+  there is no arrangement of a single thing. True, and it left the popup with no picture at all at the
+  moment the count row had just been reduced to numbers.
+  ⚠️ **The arrangement tiles are 69×62 at FOUR across** (they were 96×88 at three). At the old size one
+  tile filled a third of the popup and a four-section set ran to two tall rows — a thumbnail only has to
+  be big enough to tell one arrangement from another, and these are boxes. ⚠️ `PresetArt`'s row-band floor
+  had to come down with them, 20px → 14px: a 62px tile leaves 50px of content, so a column of three gives
+  each row 14, and a floor above its share is what clips the dashed cells’ top and bottom edges.
+  ⚠️ **Column widths was SIX small cards on ONE line at the foot of this popup — REMOVED 25 Sep**, see
+  the bullet below. Popup measured 320×185 at Default once it went.
+  ⚠️ **The popup STAYS OPEN on a count pick** and the tiles re-draw, because they read the live tree —
+  that is the whole point of the two being in one place. Verified: picking 3 lights 3, disables 2 with its
+  reason, lands two empty cells and re-renders four arrangement tiles with the applied default lit.
+  ⚠️ **The button is ALWAYS shown**, where the arrangement button used to be withheld at one section: it
+  carries the count now, and the count is the only thing you can do to a one-section banner — hiding the
+  button would hide the way out of that state. At one section the Arrangement half shows a quiet line.
+  ⚠️ `BannerCountPicker` and `SkeletonTile`'s `blocked` prop are gone with it (`blocked` had one caller).
+
+- **Support Portal — the banner's PANEL keeps Content, Banner layout and Spacing. Everything else is on
+  the bar (25 Sep 2026).** Two groups left `HERO_SPEC`:
+  ⚠️ **Layout presets** (`bannerTree` + `bannerSplit`) — the arrangement tiles and the column ratio are
+  both in the toolbar's Sections popup now, which is where the section COUNT already was. Three parts of
+  one decision, and the panel held two of them a scroll away from the third.
+  ⚠️ **Background** — the Image/Colour choice, the picture, the fill editor and the colour layer. The bar
+  already had a colour button and an image button, so the panel was a second door to both rooms, and
+  every one of these is judged by eye against the band it paints: a gradient stop dragged in a sidebar is
+  the copy you are not looking at. Every key is unchanged and still read (`bgKind`, `bannerImage`,
+  `bannerColor`, `colorMode`, `bannerGradient`, `overlayOn`, `overlayMode`, `overlayColor`,
+  `overlayGradient`), so no banner moved.
+  ⚠️ **The image button now opens a POPUP, not a file dialog** — the picture (preview · Replace · remove)
+  AND the colour layer over it, together. Those are the pair you always work on at once: you choose a
+  photograph and the very next thing you do is darken it enough to read the words. ⚠️ Removing the image
+  leaves `bgKind` alone — a banner with no picture and no colour chosen is a blank band, and the Colour
+  button beside it is where that choice lives; clearing one thing must not silently answer a second
+  question.
+  ⚠️ **Column widths was DRAWN here and is now GONE** (`ColumnSplitPicker`, removed 25 Sep — see the
+  bullet below). It was six tiles drawing the two columns at their ratio, which was the right treatment
+  for it and still the wrong place: the shared edge is draggable on the canvas, so this was a second,
+  coarser answer to a question the banner asks better. `bannerSplit` is still stored and still read.
+  ⚠️ **Content STAYS in the panel** (Zeni's call): heading, sub-heading, show-search and the placeholder.
+  The words are inline-editable on the canvas too, so it is two places for one value — kept because
+  typing a long heading into a field beats typing it into the banner.
+
+- **⚠️ Support Portal — EVERY floating toolbar is WHITE, and that is a DECISION, not a default (25 Sep 2026).**
+  The action cards' bar carried a dark `#364658` surface for one day. Asked to take every bar to
+  `#111C2C`, the question that settled it was the one Zeni raised: **the popups that open off a dark bar
+  are still white.** A bar's popup IS the bar opened, so it has to go dark with it — and inside those
+  popups sit colour swatches, image previews and skeleton tiles that are all pictures of a WHITE page,
+  every one of which then needs its own light card back. That is a dark chrome wrapped around light
+  content: two surfaces again, with more steps. Zeni's call: one surface, white, bar and popup alike.
+  `BAR_INK` is deleted and `ElementToolbar` takes the same `BAR` as everything else. Verified:
+  `quick-incident`, `quick`, `news`, `requests` and `hero` all `rgb(255,255,255)` with
+  `rgb(100,116,139)` ink.
+  ⚠️ **The `--bar-*` VARIABLES STAY** — `--bar-ink`, `--bar-ink-on`, `--bar-hover`, `--bar-on-bg`,
+  `--bar-on-ink`, `--bar-rule`, `--bar-surface`, `--bar-shadow`. Every control reads
+  `var(--bar-x, <the light value>)`, so the fallback IS the current design and they cost nothing; the
+  shadow glyph genuinely needs two of them to paint against whatever it sits on; and they are the whole
+  mechanism if a themed bar is ever wanted again — one declaration on the shell rather than a second set
+  of classes threaded through nine controls. What was removed is the second BAR, not the ability to have
+  one.
+  ⚠️ Two SVG facts learned while the dark bar existed, still true and still load-bearing: **`var()` is
+  silently ignored in an SVG presentation attribute** (`fill="var(--x)"` paints the literal fallback, so
+  both of `ShadowGlyph`'s fills are `style={{ fill: … }}`), and **a `currentColor` halo is a bloom on
+  any bar whose ink is light** — the halo therefore reads its own variable rather than the ink.
+  ⚠️ **The TOOLTIP is `#364658`** on every bar (it was `#1F2937`), which the revert did not undo: it
+  belongs to the bar it hangs off and is the one surface on a toolbar large enough to read a colour off.
+  ⚠️ **No rule before the ALIGNMENTS.** Three fences on a bar of nine glyphs is a fence every two buttons,
+  which groups nothing — and a NAMED group already separates placement from look wherever there is one.
+
+- **Support Portal — a DATA TILE has a floating toolbar, and its Icon group moved onto it (25 Sep 2026).**
+  `firstTile` — the "only the first of a shared id draws chrome" rule — was gated to `isServiceTile`, so
+  Favourite and Most Used Services had a bar while **My Assets and My CIs had none at all**: no alignment,
+  no fill, no border, no radius, no shadow, and no way to the icon. The gate is now every `-tile`.
+  ⚠️ With a bar to hang it on, `iconTarget` takes `-tile` back and `DATA_TILE_SPEC` loses its `G6`
+  accordion — the panel is Style + Spacing. A tile writes its OWN node (the icon keys live on the tile,
+  not on a child), which is what makes all four cards restyle together; an action card writes its badge's
+  `${id}-icon`. Verified: `assets-tile`, `cis-tile` and `favourites-tile` all carry Icon · aligns ·
+  colour · border · radius · shadow, the Icon popup opens with its four fields, and the panel shows
+  Spacing only.
+
+- **Support Portal — the THEME and FONT rows are ONE SURFACE each (25 Sep 2026).** Both lists stacked
+  three boxes — a white popup holding a grey row holding a tinted card — and in the theme list that
+  innermost card also carried an accent RAIL down its left edge. Three nested surfaces to say one thing,
+  where every layer after the first was chrome around a sample rather than the sample. **The ROW IS THE
+  SAMPLE now** (`ThemeRow` / `FontRow`, replacing the shared `Row` and `StylePreview`): a theme's row is
+  painted in its own accent at 10% with a 20% border of the same colour, its name is set in its own
+  heading face beside a solid accent dot, and "Heading" / "Paragraph text" underneath sample the pair.
+  Verified per theme — Meridian's name and heading both render Source Sans 3, Prism Green's Poppins over
+  an Inter body, with `innerBoxes: 0` and `rails: 0` on every row.
+  ⚠️ **The rail went with the nesting.** A solid dot says "this theme is teal" in one mark and does not
+  need an edge of the card to do it. Two of the arguments the old preview carried still hold and moved
+  onto `ThemeRow`: the BUTTON stays off a theme card (a control-shaped thing that cannot be pressed is a
+  false affordance in a picker) and the NOTE stays off it (prose under every row turns a picker you scan
+  into a page you read).
+  ⚠️ **The border is 2px whether or not a row is selected**, transparent-ish when it is not, so nothing
+  changes size on the way to being chosen — the one thing that makes a list of cards jump. Only the
+  SELECTED border leaves the palette for the product's blue, or "selected" would be a different
+  statement per theme.
+  ⚠️ **A font row's NAME is in the UI's own font**, where a theme row's is in the theme's face. On a
+  theme card the name is part of the sample; here the two lines beneath are, and a label set in the
+  thing it labels stops reading as a label.
+  ⚠️ Pre-existing type bug found on the way: `openList` was still typed `'style' | 'heading' | 'body'`
+  after the two font fields merged into one, so the type said the font list could never open. esbuild
+  does not typecheck, so the panel went on working.
+
+- **Support Portal — spacing has ONE chain per ring (25 Sep 2026).** It was two, one per axis, each with
+  its own arrow glyph. Two chains asked the admin to hold a distinction the control does not act on:
+  breaking EITHER already opened all four sides, so the second button only ever changed which pair stayed
+  tied inside a view you had reached with the first. One chain at the top right of the ring's header, one
+  statement — the sides move together, or they do not. Linked is the default and shows the same two boxes
+  as before (↕ and ↔); unlinked opens the four sides around the ELEMENT plate. Verified: 2 chains across
+  the two rings, both `aria-pressed=true` on arrival with 4 fields; unlinking padding gives 6 fields and
+  one plate.
+  ⚠️ **Both stored keys are still written.** A node saved while the panel had two toggles can be carrying
+  `paddingLinkV` and `paddingLinkH` apart, so `linked()` asks for BOTH — a ring left half-tied by the old
+  control opens on its four sides rather than claiming to be linked and moving only one axis. `setSide`
+  keeps asking per axis (`axisLinked`) for the same reason.
+
+- **Support Portal — the toolbar's fence between WHERE IT GOES and WHAT GOES IN IT (25 Sep 2026).** A
+  `<Rule />` after the drag / move / split run and before the add group, so **+ · Replace · Copy** read as
+  one thing. They ran together as an undifferentiated glyph run: on a section the Split sat against the
+  "+", on an element the move arrows did, and in both cases two unrelated ideas looked like one group.
+  Verified — section: `Drag · Move down · Move up · Split into columns │ Replace · Copy │ …`; element:
+  `Drag │ Add a widget beside this one · Replace · Copy │ …`.
+  ⚠️ It renders only when there is something on BOTH sides (`hasStructure && hasPlace`). A rule at the
+  start or end of a bar fences nothing off — it just draws a line, which on a row of small glyphs reads
+  as a disabled button. Same test the `named` fence already makes.
+  ⚠️ `rowUp` and `swapsInPlace` were hoisted out of the JSX (one of them out of an IIFE) so each
+  condition has ONE source — `hasPlace` and the buttons themselves cannot disagree about whether the
+  group is empty.
+
+- **Support Portal — the shadow glyph's halo grew, via `overflow="visible"` (25 Sep 2026).** The square
+  is unchanged: it is the FIGURE, and it has to be the size every other glyph's figure is or the whole
+  icon reads smaller than its neighbours however even the buttons are. So the shadow got bigger the only
+  way it can — it starts wider (0.5..23.5, a full 3.5 units clear of the square each side where it was
+  2.5), blurs further (1.9 from 1.3) and sits at 0.75.
+  ⚠️ **The clipping was the constraint, not the rect.** An earlier pass PULLED the halo in to 1.5..22.5
+  because the blur spread past the 24 viewBox and was sliced to a hard edge — the one thing a shadow must
+  not have. `overflow="visible"` on the svg is the real fix and is what let the rect go back out. At 15px
+  the bleed is ~2px into a 28px button's own padding, so it never reaches a neighbour.
+
+- **Support Portal — the banner's BACKGROUND is ONE button with two tabs (25 Sep 2026).** It was two
+  buttons side by side on the banner's bar — a picture one and a colour one — each opening half of
+  "what is behind this banner". A banner has ONE background and it is either a picture or a colour:
+  that is a question with two answers, not two questions, and two glyphs for it meant reading both to
+  find out which one the banner was on. One **`PaintBucket`**, the same glyph every other element's
+  background uses, opening a popup whose first row is **Image · Colour**.
+  ⚠️ **It opens on the tab the banner is already using** (`bgKind === 'color'` → Colour, else Image), so
+  it answers the question before you touch anything.
+  ⚠️ **Switching tab is LOOKING, not choosing.** Nothing is written until you pick a picture or a colour
+  — `BannerFillEditor`'s `put` already stamps `bgKind: 'color'` on every write of its own and the file
+  picker stamps `'image'` — so a tab opened to see what was there cannot repaint the band.
+  ⚠️ **The colour layer appears ONLY once there IS a picture** (`!!hero.bannerImage`), which is the
+  honest gate: it is a wash laid BETWEEN an image and the words, so with no image under it there is
+  nothing for it to be between. It still arrives ON, because text on a photograph is readable by luck.
+  ⚠️ The tab strip is the product's **pill-on-a-track** (`bg-[#F1F5F9] p-0.5`, live tab lifted out in
+  white), deliberately NOT the bordered strip `BannerFillEditor`'s Solid/Gradient uses one level down —
+  two identical strips stacked read as one control that had grown a second row.
+  Verified: bar reads `… · Sections · Banner background — a picture or a colour · Border · Corner radius
+  · Delete`; the Image tab shows "Choose a picture" with no layer controls, and after an upload gains
+  "Replace image" + "Colour layer over the image" + the gradient editor; the Colour tab shows
+  Solid/Gradient + #3D8BD0.
+
+- **Support Portal — the move arrows are the `…ToLine` pair, and the colour picker is COMPACT (25 Sep 2026).**
+  The floating toolbar moves with lucide `ArrowLeftToLine` / `ArrowRightToLine` (and `ArrowUpToLine` /
+  `ArrowDownToLine` on a vertical parent). ⚠️ The right arrow is lucide’s OWN mirror of the left one —
+  the pair are exact reflections about x=12 — so no CSS `scaleX(-1)` is used. All four changed so one
+  button is never drawn two ways depending on its parent’s axis. **`PortalColorPicker`** went from
+  286×~470 to **224×332** with nothing removed: spectrum 150→108px, rails 14→10px, fields 32→24px,
+  swatches 24→18px, Done/Cancel 32→28px, and the eyedropper is an icon beside the live colour instead
+  of a full-width row under the buttons. `W`/`H` consts drive both its width and its viewport clamp.
+- **Support Portal — ONE slim slider, `MiniRange` (`PortalRange.tsx`, 25 Sep 2026).** A 3px track filled in
+  the accent up to the value and a 9px white thumb (was 12, shrunk on request), styled once under `.portal-range` in `theme.css`. It
+  replaced the browser range input (`accent-[#3D8BD0]`, a 16px thumb on a heavy track that Chrome and Firefox
+  draw differently). Used by every border-weight and corner-radius slider — the element, icon-badge and banner
+  toolbar popups (the old `SLIDER` const is gone), `PortalBoxControls`’ shared `Track` + border row, and the
+  panel’s `SliderRow` — so every slider in the builder panels now has this look, not only those two.
+  ⚠️ The fill is a `--fill` CSS variable set from the value: a range input has no cross-browser progress
+  pseudo-element. `StepRail` (labelled stops) and the banner gap / element-panel sliders are still native.
+- **Support Portal — the banner BACKGROUND popup is the colour picker’s width, 224px (25 Sep 2026).** It was
+  320px. `BannerFillEditor`, `OverlayLayerEditor`, `GradientEditor` and `ColorField` take an opt-in
+  **`dense`** prop (28px controls, 12px text, a 20px stop bar with 14px handles, a 54px stop-position field,
+  no chevron on the colour field); only the toolbar popup passes it, so the panel’s copies keep the full
+  size. Measured: Colour/Gradient tab 224×272, Image tab 224×134, no horizontal overflow. ⚠️ Dense number
+  inputs hide the browser spinner (`[appearance:textfield]`) — at 54px the reserved spinner space clipped
+  "100" to "10".
+- **Support Portal — NO alignment in any sidebar, and no divider that fences nothing (25 Sep 2026).**
+  ⚠️ Alignment lives on the floating toolbar only. `withoutAlignment(spec)` in `PortalWidgetDrawer` strips it at
+  the drawer’s ONE entry point — every field whose key matches `/align/i` (`align`, `textAlign`, `contentAlign`,
+  `blockAlign`, `ratingAlign`, `…AlignY`) plus the `distribute` / `valign` controls, from `fields`,
+  `panel.content` and `panel.accordions` (an accordion left empty is dropped). Stripped there rather than out of
+  the dozen specs, so a new spec cannot bring one back; the keys and renderers are untouched, so nothing moves.
+  ⚠️ Every toolbar divider is now `<Rule />` (class `tb-rule`; the hover tip is `tb-tip`), and `theme.css` hides
+  a rule with no control before it, a rule followed by another, and a trailing rule — so a bar can never open on
+  a line whichever caps a node gets. Swept all 52 nodes of the default page: no bar starts, ends or doubles on a
+  divider, and no panel shows an alignment control.
+- **Support Portal — theme and font rows: NO outline, name top-right (25 Sep 2026).** Supersedes the "ONE SURFACE
+  each" bullet’s 2px border. A row (`ROW` in `PortalThemePanel`) is a light fill and nothing else — a theme’s own
+  accent at ~8% (~20% when chosen), a font’s `#F5F7FA` (`#EBF5FF` when chosen) — with the Heading / Paragraph
+  samples on the left at 13–14px / 11px, and `RowName` at the top RIGHT: 10.5px grey name, the theme’s accent
+  dot BESIDE the name (not in the card body), and a tick when selected. Selection is the deeper fill + tick, never
+  an outline. Rows are ~48px tall, about half what they were.
+- **Support Portal — ONE tab strip everywhere: the Figma pill (`.pill-track`, 25 Sep 2026).** From the Nodebase
+  Workflow Figma pill (node 296:14588; the file is not shared with the MCP account, so it was matched from a
+  screenshot): a `#EEF2F6` track, 3px padding, 8px radius, 32px tall; options 26px, 12px `#364658`; the chosen
+  one a WHITE 6px-radius pill with a soft shadow, weight 500, no border. Styled ONCE in `theme.css`, unlayered so
+  it beats the utilities the buttons still carry. ⚠️ **`aria-pressed="true"` is what paints the pill** — a strip
+  is `className="pill-track"` on the container plus `aria-pressed` on each button, so the look and the
+  accessible state cannot disagree. A new strip that forgets `aria-pressed` shows NO selection. ⚠️ Options are `flex: 1 1 auto` + `min-width: max-content` + nowrap, NOT `flex: 1 1 0`: with a zero basis every option got an equal slice, so "Default" beside "2 3 4" (the banner section count) ran out of its pill. ⚠️ Because the
+  track sets `display:flex` unlayered, a plain `hidden` utility on it no longer hides it — use `!hidden`.
+  Applied to all 14 strips: `Segmented` (labelled), Theme Primary/Secondary/Neutral + Light/Dark, the colour
+  picker Light/Dark, banner background Image/Colour, both Solid/Gradient editors (they were bordered strips
+  with a BLUE active fill — now the same pill), the banner section count, the three Border-style rows, the
+  icon picker's two tab pairs and the section-layout preset tiles.
+- **Support Portal — EVERY widget has Replace, predefined ones included, and it swaps IN PLACE (25 Sep 2026).**
+  The built-in blocks — My Open Requests, Pending Approvals, My Assets, My CIs, Announcements, Most Read,
+  Contact Us, Favourite / Most Used Services (`BUILT_IN_REPLACEABLE` in `PortalCanvas`) — get their own
+  **"Replace this widget"** button (the `swapsInPlace` slot, so Contact Us keeps its "+" for blocks inside
+  it). The Quick Actions cards are deliberately NOT on the list: their row is `LOCKED_ROWS`.
+  ⚠️ **A PREDEFINED widget swaps for ANY widget** (Zeni's call): every predefined widget is already on the
+  default page, so the old same-class-only rule left the picker empty ("Every widget of this kind is
+  already on the page"). The picker offers every Basic / Visual / Custom widget plus any predefined one not
+  on the page; an ORDINARY widget still swaps only for its own kind (`allow`, `swapType`).
+  ⚠️ **The replacement takes the ORIGINAL'S SLOT.** `PlacedElement.replaces` names the built-in it stands
+  for; the builder's `replaceElement` puts the element in `rowExtras[row]` tagged that way, and the
+  preview's `card()` draws it in the removed card's own order, share and face (the trailing `rowExtras`
+  maps skip tagged ones). The first version went through `dropInRow`, which APPENDED it to the row — on the
+  work band that sat it beside the main region AND the rail and squeezed every card to a sliver.
+  A top-level BAND (Favourite / Most Used) becomes a one-column section anchored to the nearest band ABOVE
+  that is still showing — never to the hidden band, whose sections are hidden with it (`band()`).
+- **Support Portal — the LISTING is CARDS, and the default can be moved (25 Sep 2026).** Supersedes the table
+  described in *"the entry point, the two tabs, and the listing"*. A tenant keeps 3–4 portals, and a full-width
+  table spent its width on one row. `PortalCard` (`AdminSupportPortalModule`) is the Patch module's card view
+  (`PatchInstallationTab`): ONE header row: a size-7 icon badge · the blue NAME (click =
+  customise) · its Published/Draft pill (+ Default) straight after the name · the Enabled switch far right · hairline · URL and Last modified, each full width (the Live version
+  field was REMOVED on request — the Published/Draft pill already states the portal’s state). ⚠️ **A portal is Published OR Draft, never both** (Zeni's call, 27 Sep 2026): **Save as draft on a published portal UNPUBLISHES it** — the card shows only Draft and the toast says it is no longer live. This REVERSES the earlier rule that Save as draft never unpublishes (and the amber second Draft pill that went with it); `dirty` is no longer shown anywhere. The default portal CAN therefore be a Draft. ⚠️ The builder’s big split button is ALWAYS **Publish** — it used to take the face of the last menu row picked, so after one Save as draft it read "Save as draft" and pressing it (expecting to publish) saved another draft, which looked like the status never changing · footer = ONE primary **Customise portal** plus
+  icon buttons Edit details · Preview · Settings · Copy · **Set as default** · Delete. Grid 1 → 2 (md) → 3 (xl);
+  the default sorts first. `RowActions` (the table's Edit▾ menu) is gone, and so is Pagination on this page.
+  ⚠️ **The default is STATE (`defaultId`), not `DEFAULT_PORTAL_PAGE.id`** — every rule that used the seed's id
+  (always-on, undeletable, the root URL) reads `defaultId` now. Setting a default also switches it ON.
+  ⚠️ **ONE portal is live at a time, and it is the default.** Publishing a portal that is NOT the default opens
+  `ConfirmPublish` ("Publish “X” and make it the default?"), which names the portal(s) that will move back to
+  Draft; **Publish and make default** (`publishAsDefault`) publishes it, makes it the default, switches it on and
+  sets every other published portal to Draft. Cancel leaves you in the builder with nothing changed. Publishing
+  the default itself goes straight through. The card's **star** asks the SAME question (so it is enabled on a
+  Draft — making a portal the default IS publishing it); one `publishDialog()` renders it for both routes,
+  from the builder's return and from the listing's `overlays`. The default's own card hides the star.
+- **Support Portal — the listing card is WIDE, with a PICTURE of the portal (28 Sep 2026, from Zeni's
+  reference).** Supersedes the card SHAPE in the bullet above (icon badge, three-up grid, a primary
+  Customise button in the footer); the rules about status, default and publish all still hold.
+  `PortalCard` is one full-width row: a **220×124 thumbnail** on the left, the name + Published/Draft +
+  Default pills on the title row, and under it the URL (link), a meta line — company · "Signs in with
+  <provider or ServiceOps login>" · audience — and "Last modified … by …" pinned to the foot.
+  ⚠️ **The thumbnail is the portal, per portal** (`thumbFor(p)`): the default design shows
+  **`PortalThumb`** — the REAL `SupportPortalPreview` scaled to its box, now EXPORTED from
+  `CreateSupportPortalModal` so the listing and the create dialog's Default tile show the same image
+  from one component; a portal started from a TEMPLATE (`start === 'template'`) shows that template's
+  `TemplateArt`; one built from SCRATCH shows `BlankThumb`. The same picture on every card would be
+  a picture of a page most of them are not. The thumbnail and the name both open the editor.
+  ⚠️ **EVERY action is at the TOP RIGHT, in one cluster**: Edit ▾ · Preview · Settings · Copy ·
+  Set as default · Delete, then a hairline, then the status switch (a state you read, fenced from the
+  actions you take). The big "Customise portal" footer button is GONE — the name, the picture and the
+  Edit menu all open the editor.
+  ⚠️ **Edit is ONE icon with a chevron** (`EditMenu`) opening **Edit details** ("Name, company, address
+  and sign-on") and **Edit support portal** ("Open it in the editor") — two kinds of editing, never
+  done in the same moment. The menu is PORTALLED and fixed from the button's rect, re-measured on
+  scroll/resize, because the listing scrolls in its own pane and an absolute menu inside a scroll box
+  is clipped (the old row kebab rendered as a 6px sliver). 272px wide so its descriptions hold one line.
+  ⚠️ **Edit details is a RIGHT SIDE PANEL now, not a centred dialog** (`EditPortalDetailsModal` keeps
+  its name, gains a `subtitle` = the portal's name). It is the SAME 560px full-height shape the
+  Settings panel beside it uses, so the module has one side-panel language, and a panel keeps the card
+  you opened it from in view where a centred dialog covered it. The fields STACK
+  (`PortalDetailsFields stacked`) — a panel is read top to bottom and too narrow to pair them well;
+  the create dialog still shows them two-up. ⚠️ This REVERSES the earlier rule that Edit details shares
+  the create dialog's width: that held while both were centred dialogs. What they still share is the
+  one fields component. Escape and a click on the scrim close it. It is also what opens after a Copy.
+  Verified: thumbnail 220×124 rendering the live page at scale 0.18; actions on the title row at the
+  right; menu shows both items; the panel sits at x=880 w=560 full height with stacked fields; Escape
+  closes it; Edit support portal opens the editor; no page errors.
+- **Support Portal — Solid / Gradient are CHIP tabs (`.chip-tabs`), and pill icons never shrink (25 Sep 2026).**
+  Both Solid/Gradient switches (`BannerFillEditor`, `OverlayLayerEditor`) left `.pill-track` for `.chip-tabs`: two
+  separate outlined chips, the chosen one with a 1.5px PRIMARY border and label and a filled primary check
+  (`.chip-check`) — the product's Manual / Query Based chips, recoloured from black to `#3D8BD0`. Same
+  `aria-pressed` rule as the pill. Every other tab strip stays a pill.
+  ⚠️ **The light/dark toggle's icons were drawn 8px WIDE**: the button was `size-7` (28px) and the pill CSS
+  gives 10px of side padding, leaving 8px, so the 16px svg flex-shrank to half its width. `theme.css` now pins
+  `.pill-track > button svg { flex-shrink: 0 }` and gives an icon-only option 6px padding; the toggle is
+  `w-9` with 16px icons. Check an icon's COMPUTED width, not its size prop, when one looks small.
+- **Support Portal — the card's switch IS the status (27 Sep 2026).** Supersedes every earlier note about an
+  "Enabled" flag or an always-on default. There is no `enabled` state any more: `isOn(p) = p.status === 'Published'`.
+  Switch ON a Draft → the same `ConfirmPublish` question as Publish (or, for the default itself, straight to
+  `publishAsDefault`); switch OFF → the portal becomes a Draft ("unpublished" toast). Because
+  `publishAsDefault` sets every OTHER published portal to Draft, their switches go off with their tags — the bug
+  was two cards both switched on with Published and Draft tags. The default's switch is no longer disabled; the
+  default can be switched off (it becomes a Draft that is still the default). Verified: publish portal 2 → it is
+  ON/Published/Default and the other is off/Draft; switch the draft on → confirm → they swap; switch off → both off.
+- **Support Portal — the fifth 4-section arrangement and the banner's Column widths are gone (25 Sep 2026).**
+  ⚠️ **`col-three-rows` left `PRESET_SHAPES[4]`** — "a column, and three rows beside it". At four
+  sections it put three widgets in a single narrow column beside the words, the one arrangement in the
+  set that gets thinner the more you give it. The 4-section set is four tiles now: Four rows · Two
+  columns then two rows · Three columns then a row · Two columns (second split) then a row.
+  ⚠️ **`DEFAULT_PRESET[4]` HAD to move with it**, to `split-col-row`. The note on that map already
+  says why — "a default outside the set is a layout with no way home" — and `col-three-rows` was the
+  default for four. `split-col-row` is the nearest thing left in the family: the words still hold a
+  left column with widgets stacked beside them, and the fourth takes a full-width row underneath rather
+  than making that column a third narrower. Verified: at 4 sections it is the lit tile.
+  ⚠️ **Column widths left the arrangement popup** (`ColumnSplitPicker` + `SPLITS` deleted, and
+  `BannerLayoutPanel` lost its `split`/`onSplit` props). The ratio between two columns is already
+  draggable on the canvas — the shared edge trades width between them — so six fixed ratios under the
+  arrangement grid were a second, coarser answer to a question the banner asks better, and they turned a
+  popup about ARRANGEMENT into a popup about two things. **`bannerSplit` is untouched and still read by
+  `weight()`**, so every banner keeps the ratio it has. Popup measured 320×185 at Default.
+
+- **Support Portal — the builder has KEYBOARD SHORTCUTS, and a sheet that lists them
+  (`PortalShortcuts.tsx`, 27 Sep 2026).** Full table in **SHORTCUTS.md §5** — that file is the
+  source of truth; this bullet is the reasoning.
+  **One modifier, one class of action**, which is what lets somebody guess a key they have never
+  pressed: a **bare letter** presses a button on this widget's floating toolbar, a **bare arrow**
+  moves it, **Shift+arrow** resizes it, **Alt+arrow** changes what is selected, **Alt+digit** is
+  the builder's own chrome, **Ctrl** is the document verbs. The letters are ordered the way the
+  toolbar's own fences already group its buttons — move it · place it · style it · remove it — so
+  the sheet reads in the same order as the bar it describes.
+  ⚠️ **Every widget action is a CLICK on the real toolbar**, found by `data-tip`, not a second call
+  into the canvas context. The reason that matters: **a button exists only when its action is
+  legal** — a move arrow is absent at the end of a row and on the wrong axis, Replace where nothing
+  can be swapped, Copy on a widget with no instance to clone — so a key that cannot apply is a
+  no-op for free, with no second copy of the rules to keep in step. It is also the pattern
+  `DrawerShortcuts` already uses. A tip carrying a live value is matched on its PREFIX.
+  ⚠️ **`Alt` is free here ONLY because `DrawerShortcuts` opens with `if (!props.active) return`** —
+  a detail drawer has to exist and none does in Admin. Render a drawer over this surface and every
+  Alt binding collides.
+  ⚠️ **`/` and `Ctrl+K` are deliberately unbound** — `GlobalSearch` is mounted once by `App` and
+  answers on every page, this one included.
+  ⚠️ **PUBLISH HAS NO SHORTCUT**, on purpose: it changes what requesters see and can demote another
+  portal to Draft, the only action on this screen whose consequence is outside the page. `Ctrl+S`
+  (Save as draft) covers the reflex that reaches for a key.
+  ⚠️ **Bare arrows MOVE** (Zeni's call — what Figma, Webflow and Framer all train). The cost is real
+  and is stated on the sheet rather than left to be discovered: with a widget selected the canvas
+  cannot be arrow-scrolled, so `Esc` first.
+  ⚠️ **`Ctrl+D` is Duplicate and a bare `D` is Drop shadow.** They would have been one key apart
+  with no way to say which you meant. `Ctrl+D` is the browser's bookmark and `preventDefault()`
+  stops it — measured, no bookmark dialog — which also corrects SHORTCUTS.md's header, where
+  `Ctrl+D` was listed among the un-interceptable keys. It is not one.
+  ⚠️ **A TEXT node shows the TEXT toolbar**, so `B`/`O`/`C` find nothing on it and correctly do
+  nothing; `Alt+↑` reaches the frame first. This is the documented two-mode text model, not a bug.
+  ⚠️ Mounted in **BOTH** `CanvasProvider`s and gated on `enabled`, so Preview gets only `Esc` /
+  `Alt+P` to leave — one component rather than a second listener for a second surface.
+  **The top bar's HelpCircle is a MENU again** — *Take the tour* · *Keyboard shortcuts*. Its own
+  comment had deferred the menu ("a menu with one real item is a second click in front of the only
+  thing it offers") until a shortcuts sheet existed. It exists, so there are two items.
+  Verified in a browser: arrows reorder the Quick Actions row and back; `Alt+↑` selects the parent
+  and `Alt+→` a sibling; `Ctrl+D` takes sections 1→2 and `Delete` 2→1; ten `Shift+←` presses take a
+  section 1081→973px; all six style keys open their popup; `Alt+1..4` open the right rails, `Alt+0`
+  hides the panel, `Alt+P` enters Preview and `Esc` returns; the sheet opens from the menu and from
+  `?`, closes on `Esc`, and no label truncates.
+  **Each shortcut is PRINTED ON ITS TOOLTIP** (28 Sep 2026) — the label, then its key caps to the
+  right, the way every design tool does it. A shortcut nobody can see is one only its author uses,
+  and the toolbar is where somebody is already looking when they wonder whether there is a faster
+  way. The floating tip gets `TipCap` and the top bar's Radix tooltips get `TipKeys`.
+  ⚠️ **`portalShortcutKeys.ts` is the ONE place a toolbar action's keys are written**, and it is its
+  own module because `PortalShortcuts` imports `useCanvas` from `PortalCanvas`, so `PortalCanvas`
+  importing back would be a cycle. All THREE readers go through it — the tooltip prints from it, the
+  handler presses through it (`act('background')`), and the sheet's rows read it (`k('background')`).
+  Written three times they would drift, and the drift is silent in the worst way: **a tooltip goes on
+  promising a key that no longer does anything.**
+  ⚠️ **`tips` are PREFIXES and their ORDER is load-bearing.** `keysForTip` takes the first match, which
+  is what separates the two Add buttons — `Add a widget beside this one` is declared above the bare
+  `Add a `, so a question, a slide or a link falls through to `Shift+A` and a new collection's own
+  wording needs no change. The one rule a prefix scan cannot express is add-INSIDE, which is "any
+  `Add a …` that is not the beside one", so `pressAddInside` spells it out — reading `addBeside`'s own
+  prefixes, so a change there still reaches it.
+  ⚠️ **The caps are NOT the sheet's `Kbd`.** That chip is `#F8FAFC` on white paper; on a `#364658`
+  tooltip it is a row of bright blocks that outshouts the words. The tooltip cap is the tooltip's own
+  surface lifted — `bg-white/12`, `border-white/15`, `text-white/80` — and deliberately NOT full
+  white, because the LABEL is what you came to read and the key is the footnote.
+  ⚠️ **The top bar stopped writing the key into the sentence.** `Undo (Ctrl+Z)` was the same fact in a
+  second notation, reading as prose rather than as something you press — and two tooltips one surface
+  apart should not describe a key two ways. `TipKeys` is its own small component rather than a prop on
+  `ToolbarTip`: that one owns a caret, a position and a colour, none of which belong to a Radix
+  tooltip that already has all three. What they share is four class names.
+  ⚠️ The floating tip lost its `max-w-[220px]`: with caps beside a label, the widest in the set (the
+  icon menu's) was overflowing its own box rather than wrapping, because the tip is `whitespace-nowrap`.
+  A tooltip that is one line is allowed to be as long as its line.
+  Verified: all 10 buttons on an action card's bar carry the right cap and `Drag to move` correctly
+  carries none; the top bar reads `Undo` + `Ctrl` `Z` and `Help` + `?`; the cap renders white-at-12%
+  over a dark tooltip on both surfaces.
+- **Support Portal — the shortcut sheet is ordered by PRIORITY, and two keys joined (28 Sep 2026).**
+  SHORTCUTS.md §5 is the table. The sheet (`Sheet` in `PortalShortcuts`) is the TICKET page's popup
+  (`DrawerShortcuts`) widened to two columns — keyboard-glyph title, small uppercase section heads,
+  caps joined by `+`, same `Kbd` — and laid out by `LAYOUT`: row 1 **The builder | Place**, row 2
+  **Select + Move and size | Style + Document**, so what you reach for first is read first. Preview
+  and New section lead their sections in bold. ⚠️ It used to read the SCHEME back (grouped by
+  modifier), which is tidy to its author and not the order anybody builds a page in.
+  **New keys:** `N` = new section (bound BEFORE the selection gate, so it works on an empty page;
+  `addSectionFromKey` in the builder puts it after the section holding the selection, else the band,
+  else after the last band still showing) and `Alt+L` = light/dark (also in Preview). ⚠️ Both are
+  plain arrows, not `useCallback` — a deps array evaluates during render and would hit the TDZ.
+  ⚠️ **`CHROME_KEYS`** (`portalShortcutKeys.ts`) now holds the builder's own keys beside
+  `TOOLBAR_KEYS`; the sheet and every tooltip read it, and the handler's bindings name the entry
+  they answer. **Instant tooltips** (`delayDuration={0}`) with `TipKeys` on Preview, Exit preview,
+  the mode toggle, the rail (side="left") and Undo/Redo/Help. ⚠️ **The tooltip cap has NO STROKE**
+  (Zeni's reference): `bg-white/[0.16]`, `px-[3px]`, 10px from the words — in BOTH `TipCap`
+  (floating toolbar) and `TipKeys` (Radix). The SHEET's light-surface `Kbd` keeps its border.
+  ⚠️ **Known conflicts, reported to Zeni and NOT yet changed:** `Alt+↑/↓` means "select parent /
+  first child" here and "switch right-panel group" on the ticket page; and `Alt+←/→` is the
+  browser's Back/Forward — the handler only prevents it when a sibling exists, so with no sibling (or
+  nothing selected) Alt+← is LIKELY to navigate away from the builder. ⚠️ UNVERIFIED: a Playwright
+  keypress (CDP) goes to the page and never reaches browser accelerators, so automation cannot show it
+  either way — press it by hand in Chrome to settle it. Awaiting Zeni's list (#68) and a decision.
+- **Support Portal — ARROWS WALK AN OPEN POPUP (`usePopupArrows.ts`, 28 Sep 2026).** A toolbar popup
+  that is a set of options now answers to the arrows: **moving APPLIES**, Enter keeps and closes,
+  Escape puts back what the popup opened with. Full table in **SHORTCUTS.md §5**.
+  ⚠️ **THERE IS NO CURSOR, and that is the design.** The highlight you see IS the value — the caller
+  works out `at` from its own value, the hook calls `onMove`, the value changes and `at` follows. It
+  removes the whole class of bug where a cursor and a value disagree about which option is chosen.
+  ⚠️ **CAPTURE PHASE + `stopPropagation`.** `PortalShortcuts` listens for the same arrows on the
+  window to MOVE the selected widget, so without this the arrow that walks a popup also reorders the
+  page behind it. Verified: the Quick Actions row does not move while an alignment popup is open.
+  ⚠️ **CROSSING A ROW ONLY MOVES — found by testing, not by reading.** The hook carries the column
+  when the row changes, which is right for a grid and wrong for two strips holding unrelated values:
+  `↓` from *Colour* (column 1) landed on column 1 of `Solid|Gradient` and silently turned a solid
+  banner into a gradient. Both two-row popups now compare the row first and return.
+  ⚠️ **ORIENTATION IS THE CALLER'S.** `rows: [4]` is a row of four answering to ←→; `rows: [1,1,1,1]`
+  is a vertical list answering to ↑↓ (Button style). The hook never guesses an axis.
+  ⚠️ **It CLAMPS, never wraps** — the product's own move arrows are simply absent at the edge of a
+  row, so "nothing further that way" is already what an arrow means here.
+  ⚠️ **NO DEPENDENCY ARRAY** on the effect: `at` changes on every apply and the handler closes over
+  it, so a memoised listener would keep moving from where the popup opened.
+  ⚠️ **`useOpenValue` captures DURING the render that opens the popup**, not in an effect — an effect
+  runs after paint, so a first arrow press in the same frame would restore the value it had just set.
+  ⚠️ **`AlignAxis` now closes ITSELF.** All seven call sites used to end `onPick` with their own
+  `setOpen(false)` — the same line seven times — and the keyboard needs the two separated anyway,
+  because an arrow applies WITHOUT closing where a click does both. `onPick` is apply-only now.
+  `TilePresetPicker` took the same split via optional `open`/`onClose`, which stay undefined in the
+  PANEL so the hook is inert there and a click closes nothing.
+  ⚠️ **`Sections & arrangement` is the one popup where Escape only CLOSES.** Its two rows make
+  structural edits, so a restore would have to re-create deleted sections — undo is the honest way
+  back. Everywhere else Escape restores.
+  ⚠️ **NOT wired, and each for its own reason:** the sliders (arrows there already mean "change the
+  number"), the searchable lists (search is their way in), and **Add item / Add to banner** — those
+  two ADD a widget rather than set a value, so applying as you arrow would add and delete things on
+  the way past. They need highlight-then-Enter, a different mechanism, and it is not built.
+  Verified: alignment walks left→centre→right live with the popup open and the row behind unmoved,
+  Enter keeps, Escape returns to the value at open; Shadow walks None→Soft→Medium and restores; the
+  banner background goes Image →Colour ↓(no change) →Gradient ↑(no change), Escape closes.
+
+- **Support Portal — the banner image’s colour layer is LINEAR only (25 Sep 2026).** The Linear/Radial
+  select is gone from `OverlayLayerEditor`; the angle field and Rotate take its place and get the width.
+  A radial wash reads as a spotlight on the photograph rather than as shade under the words — and the
+  words sit along an EDGE, which is a direction, and a direction is what a linear gradient is for.
+  ⚠️ `layerGradientOf` no longer DERIVES a radial either. A centre-aligned banner used to get one by
+  default (`overlaySide` falls back to the content alignment, and `center` meant radial), which would
+  have left most image banners painting a shape the control can no longer describe or undo. It is the ONE
+  reader — `bannerLayerCss` paints through it too — so the band and the editor cannot disagree.
+  ⚠️ A page that STORED `overlayGradient.type: 'radial'` while the option existed still renders radial,
+  because a stored value is returned untouched; the layer’s writer stamps `type: 'linear'`, so the first
+  touch of the editor rewrites it.
+  ⚠️ The BANNER’S OWN colour keeps both types (`BannerFillEditor` passes no `linearOnly`) — a flat
+  coloured band with a radial glow behind the words is a real design, and there is no photograph for it
+  to read as a spotlight on. Verified: no select in the image popup, Linear/Radial in the colour one.
+
+- **Support Portal — the Spacing section opens with 12px above PADDING (25 Sep 2026).** The ring wrapper
+  dropped its `first:mt-0`, so every ring carries the same `mt-3` and the first one is not pinned to the
+  drawer’s heading.
+- **⚠️ Support Portal — EVERY SPACING SIDE IS px. There are no percentages left (25 Sep 2026).**
+  Left and right used to be a **percentage of the parent** while top and bottom were px, so one control
+  carried two scales and had to caption them, and a field reading `3` painted 32 pixels. The switch
+  reaches **nine emitters** — `PortalCanvas`'s margin pair and its two drag guides, `PortalPlacedElement`
+  (twice), `portalStyleResolver`, `SupportPortalPreview`'s search-box and `padCss`, and the banner's edge
+  cells, which used **`cqw`** so a % meant the same at any nesting depth.
+  ⚠️ **The RESIZE HANDLE wrote a horizontal margin as a %** too — its `pct(px, of)` helper is now
+  `Math.round(px)`, with the second argument kept so the four call sites still read as "this much, within
+  that". A handle writing % into a px key would have moved an element by a hundredth of what it dragged.
+  ⚠️ **The 25 BANNER TEMPLATES were authored in per cent** (`pad: { left: 3 }` = 3% of a ~1081px band).
+  Read as px that is 3 pixels, so every shipped banner's words would have jumped to its left edge. They
+  are converted at the width they were designed against — **2 → 22, 3 → 32, 4 → 43** — which lands each
+  within half a pixel of where it was. Verified in a browser: Atlas renders unchanged. What is lost is
+  that the inset no longer scales with the banner's width; that is the cost of a fixed unit, and it is
+  the unit the admin asked for.
+  ⚠️ `useRestingSpacing` no longer converts what it measures — it reports px on all four sides.
+
+- **Support Portal — SPACING is ONE control: two fields, and the LINK is the disclosure (25 Sep 2026).**
+  `SpacingMatrix` opens as ONE row per ring — an `↕ px` box and an `↔ px` box — and shows the four sides
+  the moment either chain is broken. Both tied folds it back to two.
+  ⚠️ **"Four sides" is DELETED.** It was the second of two designs behind a tab so the shape could be
+  chosen from the real control rather than a sketch; Zeni picked Two fields. They shared every write path,
+  so its going took no behaviour with it.
+  ⚠️ **There is NO chevron.** Breaking a chain already states that this ring’s sides are not all the same,
+  so it is the disclosure. A chevron beside the chains was a second control for one idea — you could open
+  the four sides with both pairs still tied (four fields behaving like two), and you could unlink a pair
+  while the sides that no longer moved together were hidden.
+  ⚠️ **ANY chain broken opens that ring’s whole container**, not just its own axis: the pair still tied
+  keeps moving together when you type in either box, so all four stay true. Splitting the disclosure per
+  axis would give a top and a bottom field beside a single “left and right” one — a third shape to learn.
+  Verified: both linked → 4 fields across the two rings; padding’s ↕ broken → 6; re-tied → 4.
+  ⚠️ **Every side is a real bordered INPUT** at the product’s 32px height, divided — the number takes the
+  width, the unit sits in its own tinted cell behind a hairline. Drag-to-scrub survives (3px threshold,
+  `cursor-ew-resize`), boxes are `flex-1` so a row fills the sidebar at any width, and **every value is at
+  full strength**: a side nobody set used to print grey, which is also how a disabled field looks.
+  ⚠️ **TWO links per ring, one per AXIS** (`marginLinkV/H`, `paddingLinkV/H`), in the ring’s header. Unset
+  reads as LINKED. The two axes are never written together.
+  ⚠️ The hover-lights-that-band behaviour is unchanged; `useRestingSpacing` still looks one level in.
+
+- **Support Portal — the box-model diagram, and the empty banner cell's "+" (24 Sep 2026).**
+  ⚠️ **Superseded by the bullet above for the CONTROL's shape** — the nested diagram was one of the two
+  designs and is not what shipped as the default; the notes on the field, the resting values and the
+  canvas hint all still hold. Kept for the reasoning.
+  `SpacingMatrix` was a box-model picture: **margin outside, padding inside, the element in the middle**,
+  all eight sides visible and editable at once — the shape Duda, Webflow, Framer and the browser's own
+  inspector all draw, which is what an admin arrives already knowing. It replaced four axis sliders under
+  two headings, where no value could be READ without dragging one.
+  ⚠️ **The NUMBERS are the targets, not the edges.** That is the whole difference from the FIRST matrix
+  this had (dropped because changing one side meant aiming at a hairline): every side is a 42px input —
+  click to type, drag sideways to scrub. ⚠️ A press becomes a scrub only after the pointer has travelled
+  **3px**; under that it is a plain click and the field takes focus, or a control that looks like a field
+  would refuse to be typed in. The `cursor-ew-resize` is the only hint that it drags, which is the cursor
+  every design tool uses for a scrubber and costs no pixels on a 26px control.
+  ⚠️ **Grey = the element's own resting value, dark = a number somebody set.** Unchanged in substance from
+  the slider version, but eight of them now, so `useRestingSpacing`'s limit is visible: it looks at the node
+  and ONE level in (`padBoxOf`), so a card whose padded box is deeper — `news`, whose face is two levels
+  down — reads 0 on all eight. Honest for margin, unhelpful for padding; widening the search risks
+  measuring an inner row instead, so it was left alone.
+  ⚠️ **Hovering a side lights that band on the canvas** (`SpacingHint`, portalled, `#FF24BD` at 25%) — the
+  SAME magenta the gap strips use, because this product already says "space you are setting" in that
+  colour. A band with no thickness draws as a 2px line rather than nothing: hovering "top" when the top is
+  0 is exactly when you need telling which edge that is. It needs `nodeId`, which `PortalWidgetDrawer`
+  passes and the legacy `PortalElementPanel` does not — the diagram is correct without it.
+  ⚠️ **The link ties OPPOSITE SIDES, not all four** (`marginLinked`/`paddingLinked`, one per ring). The two
+  axes carry different units — px up and down, % left and right — so copying 24 from a px side into a %
+  side would set a quarter of the parent's width. The head states the units once instead of eight times.
+  ⚠️ `only` still draws a single ring for an element with no inside (a divider, a shape).
+  ⚠️ **The banner's empty cell is a bare `+`** (32px, white, blue glyph, label on the hover) rather than an
+  "Add to banner" CTA. The dashed cell already says the space is empty and waiting, so the words repeated
+  it at the weight of a primary button — and three empty cells put that sentence on the banner three times.
+
+
+- **Support Portal — a GATHERED ROW of cards is a section in its own right (23 Sep 2026).** The set of
+  action cards (or KPI tiles) on the banner now reads as one thing: it is BOUNDED, it is named after
+  what it holds, and it carries the bar a section should — **grip · Presets · both alignments ·
+  Delete**. Before this it was a nameless "Row" with no toolbar at all.
+  ⚠️ **It carries its OWN id prefix, `hero-gp-`**, where a plain branch keeps `hero-bx-`
+  (`bannerBoxId` branches on `isGroup`; `isBannerBox` answers for both, `isBannerGroup` for the
+  group alone). The difference is not cosmetic: a plain branch is STRUCTURE a preset made and it goes
+  when its sections go, while a group is a THING the admin placed, occupying one of the banner's four
+  section slots. They answer different questions, so they get different names, different toolbars and
+  different layout — and putting that in the id keeps `toolbarCaps` and `nodeById` pure lookups
+  rather than giving either a dependency on the tree.
+  ⚠️ **The NAME is read out of the id** — it is built from the cards it holds, so `nodeById` looks
+  each leaf up in `PLACED` and answers "Action cards" / "KPI tiles" / "Cards" with no registry to
+  keep in step. Its `kind` is `'section'`, because that is what it is.
+  ⚠️ **It lays its cards out on a GRID, not a flex row** — the one thing it is asked is how many sit
+  across, and a wrapped card in a flex row keeps the width of its own words where a grid track gives
+  it an equal share. Default is every card on one line. The **Presets** popup is the SAME
+  `TilePresetPicker` the `x-actions` block uses, so one control answers one question everywhere.
+  ⚠️ **A grid needs its own EDGE rule.** `childEdges` answers for a single line (first cell takes
+  the left inset, last takes the right), which on a wrapped grid gave the second row's first card no
+  left inset and started the two rows 24px apart — measured, 105 against 81. `gridEdge(i)` reads the
+  cell's position in the GRID instead: column 0 touches the left, the last column the right, the
+  first row the top, the last row the bottom.
+  ⚠️ **It moves and deletes as ONE.** `removeBranch` lifts a whole branch out and `branchNode`
+  finds it, and `insertBeside` now takes a **NODE** rather than an id, so a dragged row is put back
+  beside the section you aimed at intact — the same reason `append` takes one. Delete clears both
+  stores in one pass (the leaves leave `rowExtras.hero`, the branch leaves the tree): the four cards
+  arrived together, so leaving three behind is not a state anybody asked for.
+  ⚠️ **No Add, no Copy, no move ARROWS, no resize handles.** Another card comes from the banner's own
+  "+", which knows the four-card cap; a copy of a row whose cards are the product's own four
+  destinations would be those destinations drawn twice; the arrows step a node among its siblings,
+  which a branch has no support for, and the grip reaches any edge of any section anyway; and the
+  banner sizes a row by WEIGHT, so a dragged `widthPct` would be a number nothing reads.
+  Verified in a browser: grid with 4 equal tracks, panel titled "Action cards", the five-button bar,
+  2-per-row wrapping to an aligned 2×2 (507px cards at x 105/632, y 365/463), Delete clearing all four
+  and handing the Quick Actions row back, and a real HTML5 drag onto the Text & Search section's top
+  edge moving all four together ("Moved into a new row").
+
+- **Support Portal — the banner's QUICK LINKS is the Custom Card (23 Sep 2026).** The banner's "+"
+  offered "Quick links" and gave you `b-list`, the plain List — a title over a paragraph. What the
+  name promises is a glyph, a destination and the arrow that says the row goes somewhere, which the
+  **Custom Card's Links layout already draws**, down to the hairlines between rows. So the name now
+  points at `x-card` in BOTH of the banner's pickers (`BANNER_SIDE_WIDGETS` and `BANNER_BLOCKS`) and
+  `seedBannerItem` lands it on `layout: 'links'` with the heading **Quick links**.
+  ⚠️ **Nothing was built** — the layout, the three-link collection, the per-link icon picker and the
+  item-level Icon/Style packs were all already there, which is why selecting the card opens the
+  Custom Card panel with **Links** lit in Card layout and **Links 3/8** listing the rows. A second
+  links widget would have been the one-widget-two-names trap the FAQ/Accordion note records.
+  ⚠️ **The plain List LEFT the banner** rather than keeping a second row under its own name — two
+  entries in a seven-item popup both meaning "a list of links" is that same trap. It is untouched on
+  the palette for the page.
+  ⚠️ **The three links are the card's OWN defaults** (Reset my password · Request VPN access · Book a
+  meeting room), not copy invented for a banner. Only `layout`, `title` and `sub` are seeded.
+  ⚠️ `sub: ''` is deliberate, not an omission: the card's default subtext is a sentence about the
+  service desk, which under a heading reading "Quick links" describes nothing on the card. An empty
+  string draws nothing and the field is still there to type into.
+  Verified in a browser: the "+" offers Quick links and no longer List; the card lands white, bordered,
+  10px radius with 1px dividers between three rows and three accent `↗` arrows; the panel opens on
+  Custom Card with Card layout · Content · Links · Gap · Style · Shadow · Spacing and the Links tile lit.
+
+- **Support Portal — a gathered row's outline HUGS its cards, and the way back up (23 Sep 2026).**
+  The banner's edge padding now sits on a WRAPPER outside the group's own node, and the cells inside
+  take `NO_EDGES`. A gathered row is a section like the Text & Search one, and that one's outline
+  sits INSIDE the padding — measured, `hero-content` is at x105 w1033 inside a banner at x81 w1081 —
+  where the group's ran to the banner's edge with 24px of empty blue trapped between it and the first
+  card, which reads as a box drawn round the wrong thing. It is now x105 w1033 too, edge to edge on
+  the cards. ⚠️ **The BANNER only**: on the page the Action cards block keeps the gap it has always
+  had, because nothing there is inside the banner's inset.
+  ⚠️ **The group's two ALIGNMENTS moved onto that wrapper.** On the node itself they were written as
+  `alignSelf`, which had nothing to act on once the wrapper became the flex child.
+  ⚠️ **Selection handles are BACK on `hero-gp-`** (a structural `hero-bx-` row still has none): with
+  the padding outside it, the node is free to take a width, a height and a top margin, and all three
+  land. That was not true before, which is why they were withheld.
+  ⚠️ **"Select the row" is a new toolbar button on every card inside a gathered one**, and it is not
+  a convenience — it is the ONLY route up. Hugging the cards leaves the gaps between them as the
+  only bare pixels to click, and at a gap of 0 there are none, which would strand the row's Presets,
+  Delete, handles and panel. The chip's step-up arrow was removed long ago (it was
+  `pointer-events-none`, so it looked like a control and behaved like an illustration), so this
+  belongs on the bar rather than on a hover target. It reads the group off the tree with
+  `groupOf(heroTree())` — a card's registered parent is `'hero'`, not its group, so `nodeById`
+  cannot answer this.
+  ⚠️ **A banner CONTAINER gets no "+".** Contact Us declares `childTypes`, so the add-or-replace slot
+  rendered as Add — but on the banner `sixOnly` is in force, so what it offered to put INSIDE the
+  card was the banner's seven SECTION widgets. An Announcements inside Contact Us is not something
+  the card can hold, and its own Replace button already covers the real action. On the PAGE the "+"
+  stays, where the list is the card's own Button, Text and Icon blocks.
+  Verified: group [105,365,1033,78] against card1 [105,…] and hero-content [105,…,1033]; 7 handles;
+  the row's bar reads Drag · Presets · both alignments · Delete with tiles All in one row / 3 / 2 /
+  Stacked; a card's bar reads Drag · Select the row · Replace · Copy · both alignments · Delete; and
+  all six other banner widgets offer Replace and none offers a "+".
+
+- **Support Portal — PREDEFINED and OTHER never mix in a picker (23 Sep 2026).** Two classes, one
+  rule, now shared: **`isPredefinedElement`** / **`isPredefinedType`** in `supportPortalData`.
+  **Predefined** = the **Data** and **Actions** groups plus anything carrying an explicit `node` (the
+  two service rows, which sit in Custom) — the product's single-instance widgets: one to a page, one
+  to a section, and a section holding one takes nothing else. **Other** = **Basic, Visual, Custom**,
+  repeatable, several to a section, swaps only for its own kind. The catalogue has exactly five
+  groups, so there is no third case.
+  ⚠️ **A predefined widget already on the page is never offered again by either picker.** The palette
+  greys such a row and ticks it because that is a CATALOGUE you browse; the canvas popup is a list of
+  what you can put HERE right now, so the row is gone rather than dead. Two surfaces, two truthful
+  answers to different questions.
+  ⚠️ **`allow` is a PREDICATE over the grouped list, not a flat `only` array.** The grouped branch is
+  the page's picker — search, group headings, thirty-odd elements — and handing it a flat list would
+  trade all of that for a scroll of unlabelled rows. What changes is what is IN the groups.
+  ⚠️ **Replace on the page no longer offers `COMPOSABLE`.** That list is what a section is BUILT
+  from, which is the right answer for the "+ put another beside me" button and the wrong one for
+  Replace: swapping a Text for an Image is the same intent as swapping it for a Table or a Custom
+  Card, and six of twenty-three could give no reason for the other seventeen's absence.
+  ⚠️ **`sectionKind(id)` is computed in the BUILDER and read by the canvas** — the same split
+  `placedPredefined`, `splitInfo` and `canDuplicate` follow. Walking the `PLACED` registry from the
+  canvas was the alternative, and that registry keeps entries for elements that have since been
+  deleted, so a section could report itself committed to a widget nobody could see.
+  ⚠️ **The BANNER is exempt end to end** — `sixOnly` answers first with `BANNER_SIDE_WIDGETS`, and the
+  banner's sections have their own rules about what may sit on them.
+  ⚠️ **`placedPredefined` and `sectionKind` have to be DESTRUCTURED from `useCanvas()`**, and adding
+  them to the context type and the provider value is not enough. Referencing them without that is a
+  ReferenceError that blanks the builder, which esbuild cannot see — caught here only by a
+  `pageerror` listener in the browser, which is why that listener is in every probe script.
+  Verified in BOTH editors: Replace on a Text offers Basic/Visual/Custom (10 items, no Data/Actions);
+  Replace on a predefined widget offers Data/Actions and only the six not already placed; on the
+  default page every predefined row is already ticked in the library, which is consistent.
+  ⚠️ **NOT verified in the UI:** the `addBlocked` cap (a section a predefined widget owns offers
+  nothing, disabled with the reason) and the section-scoped Add list. Both compile and are wired, but
+  a section holding one widget selects the WIDGET, and an empty column's centre "+" opens the library
+  PANEL rather than the popup — so neither state was reachable from an automated run. `secKind`
+  falls back to `'empty'`, i.e. to the previous behaviour, so a fault there can only be a missing
+  restriction rather than a regression.
+
+- **Support Portal — NO SECTION OVERLAPS ANOTHER, and eight controls withdrawn (23 Sep 2026).**
+  ⚠️ **The Quick Actions row no longer climbs into the banner.** It used to take `-mt-[62px]` unless
+  a page said otherwise, and `quickOverlap` read `?? -62` as its fallback — so by DEFAULT the action
+  cards sat half on the banner and half off it, two sections sharing the same pixels, which is what
+  the row-and-column model exists to prevent. Both are gone; measured, the row's top is now exactly
+  the banner's bottom (441 = 441) with `margin-top: 0`. No template seeded a negative margin — they
+  only ever turned the default OFF — so none moved.
+  ⚠️ **The top-gap grip STOPS AT ZERO** (was `-MAX_OVERLAP`, one level of negative at −120px). Dragging
+  up closes the gap and holds there with the two outlines touching. A deliberate overlap is no longer
+  reachable by any route, which is the point.
+  ⚠️ **The BANNER's "+" withholds a placed predefined widget**, like every other picker. Its flat list
+  obeys `allow` now (the grouped branch already did), and the two banner pickers that render their
+  own list — `BannerToolbar`'s "+" and `BannerSlot`'s "Add to banner" — take `notPlaced(placedPredefined)`.
+  Of the seven, only **Announcements** and **Contact Us** are Data; KPI, Action Card, Quick links,
+  Image and Text are repeatable. Verified: the default page carries both, so the list comes up
+  `["KPI","Action Card","Quick links","Image","Text"]`.
+  ⚠️ **`COMPOSABLE` is filtered by `hidden`** where it becomes a picker list. The palette refusing
+  Accordion while the "+ beside" button still handed it out is two pickers over one catalogue
+  disagreeing about what exists.
+  **Withdrawn, every one of them keeping its key, its default and its renderer** — so no page already
+  built changes, and restoring any is one line in `fields`:
+  · the banner's **Height** rail (the bottom edge is dragged; a rail of four stops beside a handle
+  offering every value between them is two controls for one number)
+  · the banner's **Search width** and **Search corner radius** (width is the Text & Search section's
+  own drag; radius is the theme's button radius, and a search whose corners disagree with the buttons
+  reads as two designs)
+  · **Accordion** from the palette (FAQ is the same widget under a name that says what it is for)
+  · Announcements' **Image with carousel** type and its three settings — the photo, the band colour
+  and the band's text colour — which only that type ever asked for
+  · Contact Us' **Contact details** (Stacked / One line)
+  · the table's **Remove header row** (row menu), **Fit columns to width** (column menu), **both
+  header toggles** and **Cell padding** (panel). A table's first row IS its header, columns are
+  always an equal share, and padding is dragged on the bottom edge.
+  ⚠️ The palette's hover **"+" sits on `#F1F5F9`**, the same fill the row's own icon badge carries —
+  bare on white it read as a stray glyph rather than as the one thing on the row you press.
+  ⚠️ **Typecheck gotcha:** `CatalogItemDetailsModal.tsx` has pre-existing TS1127 "Invalid character"
+  errors that make `tsc` bail before it reaches your files, which is why a run can come back looking
+  clean when it never checked anything. Grep the output for YOUR filenames rather than trusting an
+  empty result.
+
+- **Support Portal — Shadow moved to the toolbar as PRESETS, and tabs became pills (23 Sep 2026).**
+  ⚠️ **Shadow left the panel entirely** (`ShadowGroup` deleted, both call sites gone) and is one icon
+  on the floating toolbar opening four tiles — **None · Soft · Medium · Strong**. It was four controls
+  (a switch, a colour with opacity, Outer/Inner, a 3×3 position) for an effect a support portal almost
+  never wants, and the one property of a block you judge by eye against the page behind it rather
+  than by reading a number. ⚠️ The tiles are **not** on the bar itself: the bar stays one glyph wide
+  and the choice opens on demand, the way Presets and the colour popup already work.
+  ⚠️ **The presets differ only in the COLOUR's opacity** (6% / 12% / 20% of `#101828`), so
+  `shadowString` is unchanged and no new key had to be stored. A page already carrying a hand-set
+  colour, an inner shadow or an off-centre position still RENDERS it — the presets simply cannot
+  produce one any more. ⚠️ Every preset writes `shadowType: 'outer'` and `shadowPos: 'bottom'`
+  EXPLICITLY, or a block once given an inner shadow would keep it while the tile said "Soft".
+  ⚠️ **The icon is DRAWN (`ShadowGlyph`), not borrowed from lucide.** The set has no drop-shadow
+  glyph: `Square` is a shape and reads as one, and the two that do show an offset pair — `Copy` and
+  `SquareStack` — already mean copy in this product, one of them on the very same toolbar. A shadow
+  icon has to show the one thing a shadow IS: a shape, and the same shape spread behind it. Two
+  rects, the back one CENTRED — an even halo on all four sides, not an offset.
+  ⚠️ **The halo is GAUSSIAN-BLURRED** (`feGaussianBlur` σ 1.3, fill at 0.7) as of 24 Sep 2026. Flat at
+  24% it read as a second square in a lighter colour — the eye has no reason to call that a shadow,
+  which is what the glyph kept being reported as. A shadow is a soft mass with no edge of its own, so
+  the fringe around the square is what names it. ⚠️ The SQUARE and the glyph's own size are unchanged
+  (4..20 in a 24 viewBox at 15px) — only the shadow did. ⚠️ The halo's rect SHRANK to 1.5..22.5,
+  because the blur spreads it back past where it started; drawn at the old 0.5..23.5 it feathered
+  outside the viewBox and was clipped to a hard edge, the one thing a shadow must not have.
+  ⚠️ The filter id comes from `useId()` **with the colons stripped** — several toolbars render this
+  glyph at once so the id cannot be a constant, and a colon inside `url(#…)` is a fragment identifier
+  a browser may reject, which silently drops the filter and brings the flat plate back.
+  ⚠️ Offset down-right was the first drawing and it was wrong twice over: an offset pair is the
+  picture `Copy` already owns, so at 15px the two were told apart only by a fill; and the icon
+  stands for the whole control, where three of the four presets differ by how far the shadow
+  SPREADS rather than by where it falls. A halo says shadow and says nothing about a direction
+  nobody picks.
+  ⚠️ `ShadowMenu` is withheld from a text CHILD but kept on a placed Text (`kind !== 'text' || placed`)
+  — the rule the panel group already had: a shadow on a run of words inside a card is a box round
+  nothing, but a dropped Text element is a widget in its own right.
+  ⚠️ **`Segmented` now renders TWO ways, decided by the OPTIONS rather than by the call site.** A
+  strip whose options ALL carry a label is a set of tabs — one of these is showing — so it takes the
+  pill-on-a-track the Theme panel's Primary / Secondary / Neutral already used: `bg-[#F1F5F9] p-0.5`
+  with the live one lifted out in white and a 1px shadow. A strip with any icon-only option keeps the
+  bordered buttons, because a bare glyph on a tinted track has no edge of its own to be read by, and
+  an icon row is usually a property (align left) rather than a place you are in. That is one edit
+  reaching **40 segmented fields across 25 widgets** — every `control: 'segmented'` field in
+  `portalWidgetSpec` / `portalCollectionSpecs` / `portalStructureSpecs` — because they all go
+  through the one control. ⚠️ `every`, not `some`: one icon-only option among labelled ones still
+  makes it an icon strip, and the mixed case is the one that most needs a border to sit on.
+  ⚠️ **The two service rows lost their Show-description switch.** A tile is a NAME over a CATEGORY —
+  "Payroll Setup" over "Finance" — and the category is what a requester scans a grid of services by,
+  so a tile without it is a list of names with the one thing that tells them apart switched off.
+  `showDesc` stays `true` in `defaults` and `ServiceTiles` still reads it.
+  ⚠️ **The Action CARD has no such toggle** and never did — its second line is a **Subtitle** text
+  field, which is content rather than a switch, so there was nothing to remove there.
+  ⚠️ **Three ReferenceErrors in one session**, all invisible to `npm run build` and all caught by the
+  `pageerror` listener in a Playwright probe: `sectionKind`/`placedPredefined` used without being
+  destructured from `useCanvas()`, `node.kind` where the prop is `kind`, and `Square` used without
+  being imported from lucide. This is the failure mode the How-to-run section names, and a browser
+  probe is the only thing that finds it.
+
+- **Support Portal — Content alignment is gone from every section, and a predefined widget cannot be
+  duplicated (23 Sep 2026).**
+  ⚠️ **No Content alignment on ANY section** — the cards row, the side rail, the work cards and every
+  custom section alike (`distribute` + `valign` removed from `SECTION_SPEC`). It was already
+  withheld on the bands of data cards, and the reason written there turns out to be the reason
+  everywhere: a section's columns FILL it. Whether they are four equal cards or two dragged to 2:1,
+  the row has no free space left for an alignment to distribute — so every option but the default
+  moved nothing, which is two rows of eight icon buttons reporting a layout that does not exist. The
+  questions a section actually has are answered above it: how many columns (the preset row), how wide
+  (the column drags) and how far apart (Gap). ⚠️ Both keys are still READ by `secBox` in the preview,
+  so a section that stored one keeps the layout it has — the controls went, the values did not.
+  ⚠️ **A PLACED predefined widget has no Duplicate** (`toolbarCaps`: `isPredefinedType(t) → copy: false`).
+  Data and Actions are the product's single-instance widgets, and every other route already enforced
+  it — the palette greys the row and ticks it, both pickers withhold it, `addElement` refuses it with
+  the reason — so Copy was the one door left open into the state all of that exists to prevent. A
+  second copy of a live card is not a second card, it is the same query drawn twice. The built-in
+  BLOCKS were already covered by `LIVE_WIDGETS`; this is the same rule for the same widget dropped as
+  an element. Verified: a placed Text keeps Copy, Announcements / My Assets / Contact Us / Most Read /
+  New Incident all lose it.
+  ⚠️ `portalPageModel` now imports `isPredefinedType` from `supportPortalData` — a NEW edge, and a
+  safe one: `supportPortalData` has no imports at all, so there is no cycle to create.
+  ⚠️ **Probe gotcha worth keeping:** in the create dialog, `p.locator('input').first()` is the ADMIN
+  SIDEBAR's "Search settings…" box, not the form's first field — a script that fills it leaves Name
+  empty and then waits forever on a Save button that is correctly disabled. Address those fields by
+  placeholder (`getByPlaceholder('Support Portal Name')` / `'Support Portal URL'`) and the Company
+  `<select>` by index.
+
+- **Support Portal — the container's BACKGROUND is on the toolbar, on all 30 panels (24 Sep 2026).**
+  Fill (None / Colour) + Background colour left the sidebar's Style group everywhere it appeared: two
+  tabs over a colour field is three controls for one question, and a background is the one property
+  of a box you pick by looking at it against the page behind it rather than by reading a hex.
+  ⚠️ **NO "None" tab.** Transparent is a colour like any other now — drag the picker's opacity to 0.
+  A separate None is a second way to express one value, and the one people press by accident when
+  they meant white. ⚠️ Which means an UNFILLED container must open the picker on **opaque white**, not
+  on `rgba(255,255,255,0)`: the picker keeps the alpha of the value it is handed, so opening on
+  transparent made the first colour anybody chose come out invisible. "No fill" is said by the
+  **chequered swatch on the button**, not by the value in the picker.
+  ⚠️ **TWO STORES, and the toolbar has to route between them.** `fillsFromConfig(id)` in
+  `portalPageModel`: a section (`sec-N`), the bands that share the SECTION spec (`quick`, `work`,
+  `work-main`, `work-rail`, `records`) and the action cards keep their fill in widget CONFIG
+  (`fill` / `bg`, painted by `fillCss`); everything else keeps it in the STYLE store (`bgFill` /
+  `bg`, painted by `containerCss`). Writing the wrong one saves a value the canvas never reads —
+  the exact fault `fillCss` was written to fix.
+  ⚠️ **`work-main` and `work-rail` never read their own fill.** Both resolve to the SECTION spec, so
+  both have always OFFERED a background, and neither painted one — invisible while the field sat in a
+  panel nobody opened for a region, obvious now it is one click from every card in the rail. They
+  spread `fillCss` like `quick` and `records` already did.
+  ⚠️ **The bar is grouped now**: `⠿ │ moves · add · copy │ align · colour · shadow │ delete`, with a
+  `Rule` hairline between. The three in the middle are all "what does this look like" where
+  everything left of them is "where does this go" — they used to be scattered (alignment at the end,
+  shadow beside Copy, colour not on the bar at all), so the row read as unrelated glyphs.
+  ⚠️ The colour button is withheld from a text CHILD, the same rule Shadow follows: a heading's colour
+  is its TYPE colour, set on the text toolbar over the words. A placed Text keeps both.
+  **The 30 panels**, for anyone auditing this later: 12 Data (My Open Requests · Pending Approvals ·
+  Most Read · My Assets · My CIs · Announcements · Contact Us · Favourite Services · Most Used
+  Services · Feedback · FAQ · FAQ items) · 10 Basic/Visual/Custom (Accordion · Card · Custom Card ·
+  Custom Card links · Custom Data Widget · List · Media Slider · Photo Gallery · Text with Image ·
+  Video) · 4 structure (Page · Row · Column · KPI) · 2 via `G1` (Data cards tile · Large/Small
+  Title) · plus Section and Action Card, which held their own inline copy.
+
+- **Support Portal — the STYLE SECTION IS GONE from every sidebar, and Gap is gone from the product
+  (24 Sep 2026).** The whole of a block's look is on the floating toolbar now:
+  `⠿ │ moves · add · copy │ align · align │ colour · border · radius · shadow │ delete`.
+  ⚠️ THREE rules, FOUR groups — move it · place it · style it · remove it. Alignment has a fence
+  of its own because where a block SITS and what it LOOKS LIKE are two questions; run together
+  they made one row of eight glyphs with a rule only at each end, which groups nothing.
+  ⚠️ **Border is one icon over three answers** — weight, style, colour — because they are three parts
+  of one question (what does this edge look like) and an edge is judged against the page behind it.
+  ⚠️ **Style and colour are REMOVED at weight 0**, not disabled: a dashed-vs-dotted choice over an
+  edge that is not drawn is a control describing nothing (§2.2's rule).
+  ⚠️ **Corner radius is its OWN icon beside it, not a fourth row inside Border.** A corner is not an
+  edge — you can round a box with no border at all — and putting it behind Border's weight gate
+  would hide it exactly when it is the only one of the two that applies.
+  ⚠️ **An icon's FIGURE has to be the size every other figure is, not its BOX.** The shadow glyph
+  sat on the right grid and still looked small: its square was 10 units across inside a 20-unit
+  halo, so the thing the eye reads as the icon was 42% of the box where lucide's Square is 75%.
+  The square now matches Square's own box and the halo grew past it to stay a halo.
+  ⚠️ **Border is a RING (`StrokeGlyph`), not lucide's `Square`.** A plain square is the SHAPE and
+  reads as one — it said nothing about the edge, which is the only thing that button controls.
+  An outline with real thickness is what a weight, a style and a colour are FOR, and it is what
+  tells it apart from the Shadow beside it (a soft halo) and the Radius beside that (one corner).
+  Drawn as an even-odd knockout rather than a 3px stroke, which blurs at 15px.
+  ⚠️ **The Border popup says "No border." at weight 0** (and adds "Square corners." when the radius
+  is 0 too). One quiet line, no icon and no card: a popup that shrinks to a single slider reads as
+  half-loaded, where a sentence says the state is one somebody chose.
+  ⚠️ **The ICON BADGE's four fields are one popup on the bar** (`IconMenu`): the glyph's colour, the
+  badge behind it, its corners and its border. It shows on the TWO nodes that have a badge and
+  nowhere else — an action card's `-icon` (all five cards, plus any placed Action Card) and a data
+  card's `-tile` (My Assets · My CIs · Favourite Services · Most Used Services). The Icon group is
+  gone from `CARD_ICON_SPEC` and `DATA_TILE_SPEC`; what stays in the panel is the one thing the bar
+  cannot ask — WHICH glyph.
+  ⚠️ **The resting values are copied from `IconBoxBlock`, not defaulted to something tidy.** An
+  action card's icon rests on whatever the CARD already chose (a template can seed one), a service
+  tile on the grey badge, a record tile on white — so a popup opening on #F1F5F9 everywhere would
+  show three of them a colour they are not.
+  ⚠️ **An `-icon` node is excluded from Colour / Border / Radius**, the Button's rule in reverse:
+  those write `containerCss` keys onto the WRAPPER around the badge, a box that paints behind the
+  thing you are looking at. A `-tile` keeps all four, because there the card and the badge inside
+  it are two real boxes — which is also why this is a separate button rather than a retarget.
+  ⚠️ **The BANNER's border and corners are on ITS toolbar too** (`BannerEdgeMenus`), with its
+  Alignment and Corners-&-border groups gone from the panel. ⚠️ It is its OWN component rather than
+  a reuse of `BorderMenu` / `RadiusMenu`: the banner keeps these under its own key names
+  (`bannerBorderWidth` / `bannerBorderColor` / `bannerBorderStyle` / `bannerRadius`) in hero config,
+  because a banner's border is painted on the BAND while every other block's comes from
+  `containerCss`. Same controls, same popups, different keys — sharing the component would have
+  written values the band never reads.
+  ⚠️ **The banner GROUP's Auto-layout trio is gone** (Direction · Align items · Vertical): all three
+  are on that section's own `GroupToolbar`, on the thing they arrange.
+  ⚠️ **The Custom Data Widget has no Icon field.** A card's glyph is its own NODE — click it and the
+  shared picker opens on the icon, which is the same edit made where you can see what it sits
+  beside. A second route through a panel two groups down is the one that goes stale.
+  ⚠️ **A COLUMN has no Width slider.** Its width is dragged — the side handle trades width with the
+  neighbour on that side so the row still adds up, where a slider could only set this column's own
+  share and leave the panel and the handles disagreeing about what a row is.
+  ⚠️ **EVERY toolbar glyph is on LUCIDE'S GRID — a 24×24 viewBox, 2px stroke, round caps — and
+  that is the whole of why the bar looks even.** The drawn ones (radius, shadow) were on a 16
+  viewBox, so at the same `size` prop the mark filled nearly the whole box while every lucide icon
+  beside it draws inside 24 with its own ~2px of air: two icons the same nominal size, one visibly
+  bigger and heavier. An icon set is a GRID and a STROKE WEIGHT before it is a set of pictures,
+  which is also why nothing is imported from another family — a glyph from elsewhere, however
+  good, arrives on a different grid at a different weight, and that IS the problem rather than the
+  fix. Where lucide has the icon it is used as-is: `Square` for Border, `PaintBucket` for Colour.
+  ⚠️ **The background button is ONE glyph, no swatch bar.** The stacked pair was two rows inside a
+  size-7 button, which read taller than every single glyph beside it — the other half of the
+  unevenness. A paint bucket says what the button DOES; the value is in the picker one click away,
+  where it can also be changed.
+  ⚠️ **GAP IS NOT A CONTROL ANY MORE** — ~13 panel fields AND the pink `GapBands` strips, removed
+  together. Every section keeps its resting gap. What is left for arranging two sections inside a
+  parent is the alignment menu's **stretch**, which now means **space-between**: it spreads them to
+  the parent's edges instead of filling them, so the space between the two IS the answer.
+  ⚠️ `secAxis(id, fallback, main)` is the ONE reader of a section's alignment, and it answers from
+  two sources — the legacy `distribute` / `valign` keys first, then the toolbar's `align` /
+  `alignY` in the style store. A section that stored the old panel's pair keeps its layout;
+  everything set from now on comes from the bar. `secPacked` reads through it too, which is what
+  gives `space-between` something to distribute (cards carrying `flex: 1 1` leave no free space).
+  ⚠️ **P1 renders nothing now, so it is FILTERED OUT of `viewPacks`** beside P2 and P4. A pack that
+  draws nothing still draws its "Style" HEADING, which left thirty widgets with a section opening
+  onto blank space. The accordion model got the same treatment — an accordion with no visible field,
+  no spacing and no non-G1 group is dropped rather than rendered empty.
+  ⚠️ **`hasDesign` is now a constant `true`, and that is deliberate.** The Design gate used to ask
+  "is there anything to style", which went false for ~30 widgets the moment P1 was withheld — and
+  took the **Spacing** matrix down with the heading, a control nobody asked to remove. Spacing lives
+  inside Design and always applies, so it is what keeps the section alive.
+  ⚠️ **Three specs kept their OWN inline copy** and had to be found separately: the **Image**
+  element and the **Icon** element both declared `borderWidth` + `radius` in a Style group — the
+  very keys the toolbar writes, on the very same node — so the panel and the bar were two controls
+  over one value and the loser was whichever you did not touch last. Both removed.
+  ⚠️ **The BUTTON is the opposite case and must NOT be treated as a duplicate.** It draws itself
+  entirely from widget CONFIG (`cfg.fillColor`, `cfg.radius`), so its panel's Corner radius is the
+  only control that reaches it and the toolbar's three would have written to a store it never
+  reads. Colour, Border and Radius are withheld from a Button on the bar (`isButton`); its look is
+  the `ButtonStyleMenu` beside them. When auditing this, check WHICH STORE the renderer reads
+  before calling two controls a duplicate.
+  ⚠️ **A removed field must NOT be left as a stub.** `TITLE_GAP_FIELD` and `TILE_GAP_FIELD` were
+  first kept as placeholders carrying `when: () => false`, which reads as safe and is not: a call
+  site that spreads a `when` of its own over the field REPLACES that guard. Two did — so the
+  Announcements card and the Custom Data Widget drew an **unlabelled text box** the moment their
+  title was moved above the card. Both consts are deleted now, along with every reference. A field
+  nobody should ever see has to not exist.
+  ⚠️ Every key and every reader is unchanged throughout — `containerCss` and `fillCss` still paint
+  `bgFill`/`bg`/`borderWidth`/`borderColor`/`borderStyle`/`radius`, and the gap keys are still
+  read — so no page already built moved. Restoring the gap strips is one line in `Sel`.
+  Verified: the bar reads Drag · Replace · Copy │ AlignH · AlignV · Background colour · Border ·
+  Corner radius · Shadow │ Delete; no Style, Fill, Border, Corner radius or Gap left in any panel;
+  Spacing still there; border weight 3 paints 3px and radius 24 paints 24px on the canvas.
+
+- **Support Portal — the TOUR, version 1: four spotlight steps that hand over to a corner dock
+  (`PortalBuilderTour.tsx` + `PortalTourArt.tsx` + `PortalTourDock.tsx`, 28 Sep 2026).** Reached from
+  the top bar's ? → *Take the tour*; the dock is re-openable from the same menu's *Editor basics*.
+  ⚠️ **THE CARD CARRIES A PICTURE**, which is the whole change of shape from the Sept 2 tour: media
+  panel → title → one short line → `n of N` beside Close / Back / Next, the form Zeni's two
+  references share. Four lines of prose about a screen somebody cannot yet picture is a manual.
+  ⚠️ **ONE DRAWING, FOUR BEATS.** Every step renders the SAME miniature of this editor — top bar,
+  canvas, panel, rail — and lights the region it is about while a small action plays inside it. Four
+  unrelated illustrations would make the reader re-learn the layout on every card; one wireframe
+  means each step says "that part, there" about a picture they read on step one. It is also what
+  lets the dock's recap be the same component running all four beats rather than a fifth drawing
+  that could drift from the other four.
+  ⚠️ **NOT A VIDEO.** SVG + CSS keyframes (in `theme.css`, prefixed `pt-`, all honouring
+  `prefers-reduced-motion`): nothing to load, nothing to buffer, crisp at any zoom, and it cannot go
+  stale the way a recorded screen does the next time the builder's chrome changes.
+  ⚠️ **The media panel is LIGHT on a dark card**, because the thing it is a picture of is light. A
+  dark wireframe on a dark card reads as decoration ON the card; a light one reads as a screen.
+  ⚠️ **THE TOUR MOVES THE SURFACE UNDERNEATH IT** — step 2 opens the Widgets panel (`onRail`), step 3
+  selects the banner (`onSelect`), because a library and a floating toolbar do not EXIST until
+  something is open or selected: a spotlight on a closed panel is a spotlight on a 72px strip of
+  icons. This deliberately reverses the old tour's "never selects behind your back", which was about
+  its one INTERACTIVE step, where the point was that you perform the gesture.
+  ⚠️ Measurement therefore runs on the NEXT FRAME (`requestAnimationFrame`) — the builder has just
+  been asked to open a panel and has not rendered, so a same-tick measure lands the hole where the
+  panel used to be.
+  ⚠️ **A step may name SEVERAL anchors and the hole is their UNION.** The last step is about
+  finishing, and finishing is light/dark, Preview and Publish, which sit either side of Reset to
+  default on one row — so `data-tour="mode"` was added beside the existing `data-tour="publish"`.
+  Two separate steps would have split one thought across two cards.
+  ⚠️ **The card must NOT be `overflow-hidden`.** Its four arrows are children hanging off its edges
+  at −10px, so clipping the card silently removes every one of them — the card still looks right, it
+  just stops pointing at anything. The media panel does its own clipping.
+  ⚠️ **FINISHING hands over to the dock; SKIPPING does not.** Somebody who read four cards gets the
+  summary they can keep; somebody who dismissed the tour on card one should not be told the same
+  thing twice by a second surface. Replaying from the dock closes the dock — the tour dims the page,
+  and a bright card in the corner of a dimmed screen is pulling against the thing it is pointing at.
+  ⚠️ **The dock's loop has a TRANSPORT**, which is what makes it a recap rather than an ornament:
+  four LABELLED chips (a dot says "there are four"; a word says which one you are about to see), a
+  play/pause, and a progress bar whose duration is set inline from the same `DWELL` the loop
+  advances on. Picking a beat PAUSES — you clicked it to look at it, and a picture that moves on four
+  seconds later is answering somebody else's question. Its caption line has a `min-h` floor, or the
+  card and everything under it jump every time the loop advances.
+  ⚠️ **It COLLAPSES to a pill**, not only closes: the corner of the canvas is space the admin is
+  working in, but a card that can only be dismissed forever makes "out of my way for a minute" and
+  "I am done with this" the same button.
+  ⚠️ `tourSeam` left the builder with the seam step. The MECHANISM stays in `PortalCanvas` (an
+  optional prop, unset = no seam held), so a future step can hold a seam open again.
+  Verified in a browser across all four steps: holes land on the rail (72px), the panel (340px), the
+  banner and the union of mode→publish (432×48); the panel really is open on step 2 and the banner
+  really is selected with its toolbar visible on step 3; the dock opens on Done at 300×285, its chips
+  scrub, and Minimise leaves the "Editor basics" pill.
+  **Version 2 is NOT built** — Zeni described only version 1.
+- **Support Portal — the tour dock is an ILLUSTRATED CAROUSEL (`PortalTourScenes.tsx`, 28 Sep 2026).**
+  Supersedes the dock half of the "dock plays a STORY" bullet below. Zeni chose, from the Miro "what's
+  new" carousel she shared: **one illustrated scene per chapter** — Add · Select · Arrange · Style ·
+  Publish — each on its own coloured ground (`TOUR_CHAPTERS[].ground`/`blob`) with REAL WORDS ("My Open
+  Requests", "INC-32 VPN not connecting", "Portal published"), and a cursor with a name tag, **"You"**,
+  doing every action. ⚠️ Scenes, not a miniature: the old story drew the whole editor in grey bars at
+  postage-stamp size, a wireframe of a wireframe. The dock is **Previous · dots · Next: ‹name›** (last
+  slide: **Watch again**); the chapter-tab strip, play/pause and progress bar are gone.
+  ⚠️ **It AUTO-PLAYS UNTIL YOU TAKE OVER** (`driven`): unattended it runs all five chapters (~17s);
+  once you press Previous, Next or a dot, the chosen chapter LOOPS like a GIF until you move. A picture
+  that walks off while you are still looking is what made the old one feel slow.
+  ⚠️ **Frames are still data and there is still one renderer per scene** (`SCENE_FRAMES`,
+  `SCENES[ch]`); the scene does NOT remount within a chapter, so transitions carry the ghost, the cursor
+  and the resized card — it DOES remount between chapters, and the `Cursor` sits outside it so it glides
+  across the seam. Timings are written at the pace they PLAY (no scaling factor).
+  ⚠️ The cursor must aim at a button's CENTRE — the toolbar sits at (30,42) and its glyph centres are at
+  `x + [9,22,33,44,57,68,79,92]`, `y + 7`; aimed between glyphs, "You" looked like it had missed.
+  ⚠️ On a TINTED card the pills, badge and icon square turn WHITE — the tint (#EEF4FF) is the same blue
+  as the pills (#EAF3FB), so they vanished. New keyframes `pt-slide` / `pt-pop` / `pt-burst` in
+  `theme.css`, all under `prefers-reduced-motion`. The old dock story was DELETED from
+  `PortalTourArt.tsx`, which now holds only the four spotlight steps' pictures; "Take the tour" left
+  the dock (the Help menu has it), so the dock's `onReplay` prop is accepted but unused.
+  Verified: auto-play titles change at 0 · 3.4 · 7.5 · 10.0 · 14.4s; a dot press holds its chapter
+  past its own length; Previous is disabled on Add; every Next names its chapter; no page errors.
+- **Support Portal — the tour is PORTALLED to the body, and it hands the selection back (28 Sep 2026).** ⚠️ Rendered inside the builder, the tour lived in the builder shell's own stacking layer (`fixed … z-[9000]`), so its z-10500 only counted INSIDE that shell; the floating toolbar is portalled to the body at z-9999 and painted over the whole shell, blur and all — on step 4 the banner's toolbar was measured as the topmost element on screen. `createPortal(…, document.body)` puts the tour above every toolbar; on the banner step the toolbar still shows because it sits inside the spotlight's hole. ⚠️ A step with no `select` now CLEARS the selection (`select(null)` does not stand the rail panel down, so step 2's library stays open), and the tour restores whatever was selected when it opened (`selected` prop, captured once). Verified: toolbars on screen per step = 0 · 0 · 1 · 0, and the prior selection is back after Done. **The story plays at `PACE = 0.55`** of its rest timings (33.4s → 18.4s; Zeni found it too slow): one factor over `STORY_AT_REST` so the rhythm between scenes is kept, with the glides cut to match (`T` 340ms, `GLIDE` 700ms) so a move still finishes inside the frame that makes it.
+- **Support Portal — the tour DOCK plays a STORY, not the four beats (28 Sep 2026).** Supersedes the
+  dock half of the bullet above ("the dock's recap is the same component running all four beats").
+  The spotlight and the dock do DIFFERENT JOBS: the four cards point at WHERE things are on this
+  screen; the dock shows what DOING something looks like, which a spotlight cannot, because it can
+  only light a region that already exists. So the dock is `TourStory` (`PortalTourArt.tsx`), a
+  17-frame story on a BLANK canvas in five chapters — **Add · Select · Arrange · Style · Publish**:
+  drag a widget in from the library → select it (outline + floating toolbar + the panel swapping to
+  its settings) → the `+` adders → a second column → drag the shared edge while the neighbour gives
+  way → colour picker → shadow presets → padding/margin in the panel's Spacing → Add section →
+  Publish, with a green tick. ⚠️ It starts from a BLANK page on purpose: on the default page a dropped
+  widget is one card among a dozen and the eye cannot find what just happened.
+  ⚠️ **One miniature still, now two uses** — `TourStory` draws the SAME editor at the SAME geometry
+  (`R`) as the four spotlight cards, and both draw a placed widget with ONE `WidgetCard`, so the
+  principle the old bullet stated (never make the reader learn the layout twice) survives.
+  ⚠️ **FRAMES ARE DATA** (`STORY: StoryFrame[]` — card state, selection, lit toolbar button, open
+  popup, panel kind, pointer position, click) and ONE renderer draws them; CSS transitions carry the
+  ghost, the pointer and the resized card between frames. Seventeen keyframe animations would be
+  seventeen things to keep in step; this is seventeen rows of a table.
+  ⚠️ **The story must NOT remount between frames** — no `key` on `TourStory`. Transitions need the
+  SAME DOM nodes changing values; keying by frame turns every move into a cut.
+  ⚠️ **Every toolbar action shown is real, in the bar's real order** — add-a-column, drag the shared
+  edge, colour, shadow — and spacing is shown in the PANEL because that is where it lives. A tour
+  that invents a gesture teaches somebody to look for a button that is not there. The Arrange caption
+  says "a row BELOW", not "above and below", because the picture only has a below adder (the toolbar
+  occupies the top) — the words must match the drawing.
+  ⚠️ **ONE CLOCK** drives the frame advance AND the chapter progress bar: a single rAF loop
+  accumulates elapsed time, advances from it and writes the bar's width from it. A timeout plus a CSS
+  bar sharing a duration drift the moment somebody pauses. The bar is written through a REF, never
+  state — re-rendering the dock at 60fps to move one bar would redraw the whole story each time.
+  ⚠️ **A chapter chip PLAYS that chapter and HOLDS at its end** (`holdAfter`), rather than pausing on
+  its first frame — "jump and pause" froze on the drag without the drop. Play from a held last frame
+  starts the NEXT chapter rather than re-holding the same one.
+  ⚠️ **The dock's controls live in a HEADER ROW, not over the picture.** They floated on its top-right
+  corner — exactly where the miniature's Publish button is — so the final frame, the one the story
+  builds to, had the button, the pointer and the tick hidden under Minimise/Close. Verified with
+  `elementFromPoint` that the SVG itself is now the top element there.
+  ⚠️ **The caption has a 52px floor** — narration runs one or two lines, and a 40px floor let a
+  two-line caption push the chip row down so the transport jumped between frames. Measured: the chip
+  row sits at ONE y across all five chapters now. Dock is 340×362.
+  **Step 2's landed widget is DRAWN as a card** (`pt-ghost` + `pt-land` + `pt-target` in
+  `theme.css`). It used to be the library row scaled 4.2×2.1 (`pt-fly`, deleted), which stretched
+  its stroke and insides into a smeared pill — a row that has been zoomed is not a widget that has
+  been placed. The ghost now only TRANSLATES at its own size, the card fades in as it arrives, and the
+  dashed drop target fades OUT (it ran under the card's border as a faint second edge otherwise).
+  Under `prefers-reduced-motion` the ghost is hidden and the landed card shown — the still has to
+  show where the story ENDS.
+
+- **⚠️ The product's Radix tooltip is `z-[10200]`, not `z-50` (`ui/tooltip.tsx`, 28 Sep 2026).** It is
+  portalled to the BODY, so it competes with every full-screen layer — and the Support Portal builder is
+  `z-[9000]`. At z-50 every tooltip opened inside the builder (the rail's Widgets/Theme/Branding/Banners,
+  most of the top bar) rendered UNDERNEATH it: open, opaque, correctly placed and invisible. ⚠️ A DOM check
+  does not catch this — test with `elementFromPoint` at the tooltip's centre. It sits above the drawers
+  (9999) and dialogs (10000–10051) and below the tour's spotlight (10500).
+  **`TipKeys` moved to `PortalTipKeys.tsx`** (re-exported from `PortalShortcuts`) so the canvas can use it
+  without an import cycle — which is what gave the **"+ Add Section" pill** its instant tooltip with **N**.
+  Words sit 12px off the caps (`gap-3`, floating toolbar tip too), and a tooltip carrying caps shows 11px
+  after the last cap: `.tip-keys` in theme.css sets 10px, because the tooltip carries a pixel of slack past
+  its content (a negative margin never changed its measured width). The shortcut sheet reads **label left,
+  keys right**. The portal card's name / URL / details are ONE group, 8px apart — the action cluster hangs
+  into the title row's margin (`-my-[5px]`) so 32px buttons no longer set the row's height.
+
+## Parked features
+Four Support Portal features are BUILT-OR-PART-BUILT AND SWITCHED OFF, with their full context in
+[future-tasks.md](future-tasks.md): **AI** (rail item commented out in `SupportPortalBuilder`; the
+real ask is section-scoped AI, not portal-wide generation), **Advanced Tabs** (`l-tabs`, hidden —
+needs a collection spec, copy Accordion's), and **custom templates** (the gallery and the New-page
+route exist; save-as-template does not). ⚠️ **Media Slider came OFF this list** — it is back in the
+palette and its panel was repaired on 16 Sep 2026 (Carousel type, a picture per slide); future-tasks.md
+still describes it as parked. ⚠️ Each is hidden by a FLAG, not deleted — spec, renderer and panel all stay, so
+restoring is one line and an existing page carrying the element keeps working. Read that file before
+touching any of them; it names the files, the styling already decided, and why each was parked.
+
+## Deployment
+Repo: https://github.com/zenichakalasiya/serviceops-ticket-detail
+Live URL: https://zenichakalasiya.github.io/serviceops-ticket-detail/
+
+**Deploying is just `git push` to `main`.** `.github/workflows/deploy.yml` builds with pnpm and
+publishes to Pages; `build_type` is `workflow` and the run takes ~2 min. Verified 13 Aug 2026 —
+the push deployed on its own and the new code was live in the bundle, so no manual step is needed.
+
+⚠️ An earlier note here said Pages served the **`gh-pages` branch** and that deploys had to be run
+by hand with `npx gh-pages -d dist`, because the workflow once stalled on `deployment_queued`.
+That is no longer true and running it by hand now would fight the workflow. Kept as a pointer in
+case the pipeline stalls again.
+
+`vite.config.ts` `base` is `/serviceops-ticket-detail/`; changing the repo name means changing that
+too or every asset 404s.
+
+Upstream original: https://github.com/ronak-patel-motadata/ServiceOps-Ticket-Detail-
+
+## Handoff
+Latest session state is in [HANDOFF.md](HANDOFF.md) — read it first.
