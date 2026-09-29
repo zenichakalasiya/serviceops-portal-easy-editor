@@ -54,7 +54,7 @@ export const PORTAL_NODES: PortalNodeDef[] = [
   { id: 'rail', name: 'Sidebar', kind: 'rail', content: 'none' },
 
   // ── hero ──
-  { id: 'hero', name: 'Hero', kind: 'section', content: 'hero' },
+  { id: 'hero', name: 'Banner', kind: 'section', content: 'hero' },
   /* The banner's words are GROUPS, like Figma auto-layout frames: Group 1 holds the heading and the
      subheading; the Content group holds Group 1 and the search. Each group has a direction and a gap,
      and each element inside hugs its own width. */
@@ -443,7 +443,7 @@ export interface NodeStyle {
   /** Sections only. 'page' MOVES the background behind every section (see §7.21). */
   bgScope?: 'section' | 'page';
   borderMode?: 'none' | 'line' | 'shadow';
-  elevation?: 'none' | 'subtle' | 'raised';
+  elevation?: 'none' | 'subtle' | 'raised' | 'flat';
   /* ── P2 Size & position ── */
   /** % of its column, 10–100. Distinct from `width`, which is the px a resize drag produced. */
   widthPct?: number;

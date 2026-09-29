@@ -1,3 +1,15 @@
+> **THIS IS THE EASY-EDITOR FORK** (created 29 Sep 2026 from serviceops-ticket-detail @ f10c89a).
+> Folder `D:\Motadata\ServiceOps-Portal-Easy-Editor`, repo `zenichakalasiya/serviceops-portal-easy-editor`,
+> live at https://zenichakalasiya.github.io/serviceops-portal-easy-editor/ (vite `base` = `/serviceops-portal-easy-editor/`, dev port **5201**).
+> It exists to make the Support Portal editor easy for a NON-DESIGNER admin. It never pushes to the original repo.
+> What is new here (everything else is identical to the original):
+> - **Page style kit** — Theme panel, top: Cards (Standard/Flat/Outlined/Soft/Raised) · Corners (Standard/Sharp/Rounded/Round) · Spacing (Compact/Standard/Spacious). `PortalTheme.kit` → `setPortalKit` + `kitClass` (portalStyleResolver) → classes on the theme wrapper; CSS at the foot of `theme.css` targets `.portal-card` (data cards, action cards, placed Surface) and `.portal-section` (SECTION_PAD). Gaps between cards read `kitGap()`. **Standard = the original look, no class.** Hand-styled cards keep their look (inline beats the stylesheet); the panel shows "N blocks keep their own look · Make them follow" (`followPageStyle` in the builder clears `BOX_STYLE_KEYS` + the quick cards' config box keys).
+> - **Style button** — ONE labelled "Style ▾" on the floating toolbar replaces the Background/Border/Radius/Shadow icons (`StyleMenu` in PortalCanvas): six one-click looks (Card, Plain, Outline, Soft fill, Tinted, Raised), "Follows page style" / "Use page style", and a folded **Customise** (background, edge, corners, shadow). Corners are NOT part of a look (the page decides them). New elevation value `flat` removes a card's resting shadow. The old ColorMenu/BorderMenu/RadiusMenu/ShadowMenu components are still in the file, unused.
+> - **Spacing S · M · L** — `SimpleSpacing` (SpacingMatrix.tsx) wraps the matrix: Space inside / Space around as Auto·S·M·L; "Exact values" opens the old matrix (auto-opens when values are custom). Around = top/bottom only.
+> - **Single-letter shortcuts are OPT-IN** (`lettersOn`, localStorage `portalLetterKeys`), switch in the shortcut sheet; tooltips hide letter caps while off. Style = `L`; `D` (shadow) is gone.
+> - **Reset to default** moved into a ⋯ "More page actions" menu with a red confirm dialog.
+> - Plain words: Hero→Banner, colour tabs Brand/Status/Greys, "Main colour", "Space inside/around", "When you resize a column".
+
 **On session start:** If `HANDOFF.md` exists in this directory, read it before anything else for the latest state of the work.
 
 # ServiceOps Ticket Detail

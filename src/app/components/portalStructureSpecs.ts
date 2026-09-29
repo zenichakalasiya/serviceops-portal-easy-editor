@@ -273,10 +273,10 @@ export const SECTION_SPEC: WidgetSpec = {
              its own; a value left behind by the other mode is read by the wrong rule, which collapses
              or overflows the row. Redistributing is also the honest answer to "what does this row do
              now" — you changed the rule it distributes by. */
-          { key: 'resize', label: 'Responsive behaviour', control: 'select',
+          { key: 'resize', label: 'When you resize a column', control: 'select',
             options: [
-              { value: 'fill', label: 'Fill items' },
-              { value: 'fixed', label: 'Fixed items' },
+              { value: 'fill', label: 'The others adjust to fill the row' },
+              { value: 'fixed', label: 'The others keep their width' },
             ],
             info: 'Fill — dragging one column re-flows its siblings so the row always fills the section. Fixed — every column keeps its own width, and dragging one leaves the others exactly where they are.' },
           /* Figma's spacing pair: the gap between the section's columns and between its rows. */

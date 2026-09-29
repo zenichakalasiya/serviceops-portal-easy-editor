@@ -52,7 +52,7 @@ import { LineStylePicker } from './PortalLineStyles';
 import { IconFramePicker } from './PortalIconFrame';
 import type { IconFrame } from './PortalIconFrame';
 import type { LineStyle } from './PortalLineStyles';
-import { SpacingMatrix, useRestingSpacing } from './SpacingMatrix';
+import { SimpleSpacing, useRestingSpacing } from './SpacingMatrix';
 
 import { ColorField } from './PortalColorPicker';
 import { ARROW_GROUP, IconField, IconGlyphField } from './PortalIconPicker';
@@ -1927,5 +1927,5 @@ function RestingSpacing({ nodeId, style, onChange, only }: {
   nodeId: string; style: NodeStyle; onChange: (p: Partial<NodeStyle>) => void; only?: 'margin' | 'padding';
 }) {
   const resting = useRestingSpacing(nodeId, style);
-  return <SpacingMatrix style={style} onChange={onChange} only={only} resting={resting} nodeId={nodeId} />;
+  return <SimpleSpacing style={style} onChange={onChange} only={only} resting={resting} nodeId={nodeId} />;
 }

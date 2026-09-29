@@ -38,11 +38,12 @@ export const TOOLBAR_KEYS = {
   moveRight: { keys: ['→'], tips: ['Move right'] },
   moveUp: { keys: ['↑'], tips: ['Move up'] },
   moveDown: { keys: ['↓'], tips: ['Move down'] },
-  /* style */
+  /* style — ONE key for the Style popup, which holds the looks and every box control. B, O and C
+     stay for the banner, whose background, border and corners are still separate buttons. */
+  style: { keys: ['L'], tips: ['Style'] },
   background: { keys: ['B'], tips: ['Background colour', 'Banner background'] },
   border: { keys: ['O'], tips: ['Border'] },
   radius: { keys: ['C'], tips: ['Corner radius'] },
-  shadow: { keys: ['D'], tips: ['Shadow'] },
   alignH: { keys: ['H'], tips: ['Horizontal alignment'] },
   alignV: { keys: ['V'], tips: ['Vertical alignment'] },
   icon: { keys: ['I'], tips: ["The glyph's colour"] },
@@ -56,10 +57,28 @@ export type ToolbarAction = keyof typeof TOOLBAR_KEYS;
 /** The prefixes one action's button can carry — what `PortalShortcuts` presses. */
 export const tipsOf = (a: ToolbarAction): string[] => TOOLBAR_KEYS[a].tips;
 
-/** The keys a tooltip should print, or null where the button has no shortcut. */
+/* ── Single-key shortcuts are OPT-IN ─────────────────────────────────────────────────────────────
+ *
+ * ⚠️ Off by default. An admin who clicks a card and then starts typing — expecting to edit its words —
+ * used to fire B, O, C, D, H, V… and open popups they never asked for. Delete, the arrows, Enter, Esc
+ * and every Ctrl / Alt combination stay on for everyone; the bare letters are for the people who went
+ * looking for them, and the shortcut sheet is where they are switched on.
+ * Stored per browser: it is a habit of the person at this keyboard, not a property of the portal. */
+const LETTERS_KEY = 'portalLetterKeys';
+export const lettersOn = (): boolean => {
+  try { return localStorage.getItem(LETTERS_KEY) === 'on'; } catch { return false; }
+};
+export const setLettersOn = (v: boolean) => {
+  try { localStorage.setItem(LETTERS_KEY, v ? 'on' : 'off'); } catch { /* storage blocked — stays off */ }
+};
+/** A shortcut that is one bare letter — what the opt-in governs. */
+export const isBareLetter = (keys: string[]) => keys.length === 1 && /^[A-Z]$/.test(keys[0]);
+
+/** The keys a tooltip should print, or null where the button has no shortcut — or where its only
+ *  shortcut is a letter that is switched off, so a tooltip never promises a key that does nothing. */
 export function keysForTip(label: string): string[] | null {
   for (const entry of Object.values(TOOLBAR_KEYS) as ToolbarKey[]) {
-    if (entry.tips.some((t) => label.startsWith(t))) return entry.keys;
+    if (entry.tips.some((t) => label.startsWith(t))) return isBareLetter(entry.keys) && !lettersOn() ? null : entry.keys;
   }
   return null;
 }

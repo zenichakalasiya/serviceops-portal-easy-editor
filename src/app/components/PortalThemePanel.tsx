@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { PORTAL_FONTS } from './portalPageModel';
-import { Check, ChevronDown, Moon, Sun } from 'lucide-react';
+import { Check, ChevronDown, Info, LayoutTemplate, Moon, Sun } from 'lucide-react';
+import type { KitCorners, KitLook, KitSpacing, PortalKit } from './portalStyleResolver';
 import { toast } from 'sonner';
 import { ColorDot } from './PortalColorPicker';
 import { Segmented, UploadZone } from './PortalControls';
@@ -28,6 +29,8 @@ export interface PortalTheme {
   buttonId: string;
   /** Overrides on top of the palette — the Custom section and any hand-edited swatch. */
   custom?: Record<string, string>;
+  /** The page-wide style kit — how every card looks, its corners, and the spacing. */
+  kit?: PortalKit;
 }
 
 export const DEFAULT_THEME: PortalTheme = { mode: 'light', paletteId: 'blue', packId: 'inter', buttonId: 'solid' };
@@ -51,8 +54,8 @@ const prim = (
   color: string, alt: string, text: string, bg: string,
   dColor: string, dAlt: string, dText: string, dBg: string,
 ): Swatch[] => [
-  { key: 'primary', label: 'Primary', light: color, dark: dColor },
-  { key: 'primaryAlt', label: 'Primary alt', light: alt, dark: dAlt },
+  { key: 'primary', label: 'Main colour', light: color, dark: dColor },
+  { key: 'primaryAlt', label: 'Main colour, darker', light: alt, dark: dAlt },
   { key: 'pageText', label: 'Page text', light: text, dark: dText },
   { key: 'pageBg', label: 'Page background', light: bg, dark: dBg },
 ];
@@ -335,11 +338,132 @@ export function ThemeModeToggle({ mode, onChange }: { mode: 'light' | 'dark'; on
   );
 }
 
+
+/* ── PAGE STYLE — the kit ──────────────────────────────────────────────────────────────────────
+ *
+ * The one place an admin who is not a designer decides how the whole portal FEELS, in three answers:
+ * how cards sit on the page, how round they are, and how much air is between them. Every card follows,
+ * so most portals never open a card's own Style popup at all.
+ *
+ * ⚠️ Pictures, not words, for the two visual questions. "Soft shadow" means nothing until you see it,
+ * and a tile that IS the effect answers the question before the label is read. Spacing is a pill
+ * because it is an ORDERED choice — less, the same, more — and a track says that.
+ * ⚠️ STANDARD is first and is the page as it always was: choosing nothing changes nothing. */
+const KIT_LOOKS: { id: KitLook; label: string; card: React.CSSProperties }[] = [
+  { id: 'standard', label: 'Standard', card: { border: '1px solid #E5E7EB', boxShadow: '0 1px 2px rgba(16,24,40,0.05)' } },
+  { id: 'flat', label: 'Flat', card: { border: '1px solid transparent' } },
+  { id: 'outlined', label: 'Outlined', card: { border: '1px solid #B6C2D5' } },
+  { id: 'soft', label: 'Soft', card: { border: '1px solid transparent', boxShadow: '0 1px 2px rgba(16,24,40,0.05), 0 4px 10px -3px rgba(16,24,40,0.16)' } },
+  { id: 'raised', label: 'Raised', card: { border: '1px solid transparent', boxShadow: '0 2px 3px rgba(16,24,40,0.08), 0 8px 16px -4px rgba(16,24,40,0.26)' } },
+];
+const KIT_CORNERS: { id: KitCorners; label: string; r: number }[] = [
+  { id: 'standard', label: 'Standard', r: 8 },
+  { id: 'sharp', label: 'Sharp', r: 2 },
+  { id: 'rounded', label: 'Rounded', r: 10 },
+  { id: 'round', label: 'Round', r: 16 },
+];
+const KIT_SPACING: { id: KitSpacing; label: string }[] = [
+  { id: 'compact', label: 'Compact' },
+  { id: 'standard', label: 'Standard' },
+  { id: 'spacious', label: 'Spacious' },
+];
+
+function KitTile({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button onClick={onClick} aria-pressed={on} className="group flex min-w-0 flex-col items-center gap-1.5">
+      <span className={`flex h-[46px] w-full items-center justify-center rounded-md border-2 bg-[#F4F6FA] transition-colors ${
+        on ? 'border-[#3D8BD0] bg-[#EEF5FC]' : 'border-transparent group-hover:border-[#CBD5E1]'
+      }`}>{children}</span>
+      <span className={`truncate text-[11px] ${on ? 'font-semibold text-[#3D8BD0]' : 'text-[#64748B]'}`}>{label}</span>
+    </button>
+  );
+}
+
+function PageStyleSection({ theme, onChange, ownLookCount, onFollowPageStyle }: {
+  theme: PortalTheme;
+  onChange: (patch: Partial<PortalTheme>) => void;
+  ownLookCount?: number;
+  onFollowPageStyle?: () => void;
+}) {
+  const kit = theme.kit ?? {};
+  const look = kit.look ?? 'standard';
+  const corners = kit.corners ?? 'standard';
+  const spacing = kit.spacing ?? 'standard';
+  const set = (p: Partial<PortalKit>) => onChange({ kit: { ...kit, ...p } });
+  const lookCss = KIT_LOOKS.find((l) => l.id === look)!.card;
+  const radius = KIT_CORNERS.find((c) => c.id === corners)!.r;
+  return (
+    <div className="mb-5 rounded-lg border border-[#E5E7EB] bg-white p-3">
+      <div className="flex items-center gap-2">
+        <span className="flex size-6 items-center justify-center rounded bg-[#EBF5FF] text-[#3D8BD0]"><LayoutTemplate size={13} /></span>
+        <span className="text-[13px] font-semibold text-[#1E293B]">Page style</span>
+      </div>
+      <p className="mt-1 text-[11.5px] leading-[1.5] text-[#7B8FA5]">Set it once — every card on the page follows.</p>
+
+      <p className="mb-1.5 mt-3 text-[12px] font-medium text-[#364658]">Cards</p>
+      <div className="grid grid-cols-5 gap-1.5">
+        {KIT_LOOKS.map((l) => (
+          <KitTile key={l.id} on={look === l.id} label={l.label} onClick={() => set({ look: l.id })}>
+            <span className="flex h-[26px] w-[34px] flex-col justify-center gap-[3px] bg-white px-1.5" style={{ ...l.card, borderRadius: radius / 2 + 2 }}>
+              <span className="h-[3px] w-4/5 rounded-full bg-[#CBD5E1]" />
+              <span className="h-[3px] w-1/2 rounded-full bg-[#E2E8F0]" />
+            </span>
+          </KitTile>
+        ))}
+      </div>
+
+      <p className="mb-1.5 mt-3 text-[12px] font-medium text-[#364658]">Corners</p>
+      <div className="grid grid-cols-4 gap-1.5">
+        {KIT_CORNERS.map((c) => (
+          <KitTile key={c.id} on={corners === c.id} label={c.label} onClick={() => set({ corners: c.id })}>
+            <span className="h-[26px] w-[38px] bg-white" style={{ ...lookCss, borderRadius: c.r }} />
+          </KitTile>
+        ))}
+      </div>
+
+      <p className="mb-1.5 mt-3 text-[12px] font-medium text-[#364658]">Spacing</p>
+      <div className="pill-track">
+        {KIT_SPACING.map((s) => (
+          <button
+            key={s.id}
+            aria-pressed={spacing === s.id}
+            onClick={() => set({ spacing: s.id })}
+            className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5] transition-colors hover:text-[#364658]"
+          >{s.label}</button>
+        ))}
+      </div>
+
+      {/* ⚠️ Stated, never silent. The kit is a default, so a card somebody styled by hand keeps its
+          own look — and a kit change that leaves three cards untouched reads as a broken control
+          unless the panel says why and offers the way to hand them back. */}
+      {!!ownLookCount && onFollowPageStyle && (
+        <div className="mt-3 flex items-center gap-2 rounded-md bg-[#F8FAFC] px-2.5 py-2">
+          <Info size={13} className="flex-shrink-0 text-[#94A3B8]" />
+          <span className="min-w-0 flex-1 text-[11.5px] leading-[1.45] text-[#64748B]">
+            {ownLookCount === 1 ? '1 block keeps' : `${ownLookCount} blocks keep`} its own look
+          </span>
+          <button onClick={onFollowPageStyle} className="flex-shrink-0 rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[#3D8BD0] transition-colors hover:bg-[#EBF5FF]">
+            Make them follow
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── the panel ────────────────────────────────────────────────────────────── */
 
 type Tab = 'primary' | 'secondary' | 'neutral';
+/* Plain words for the three owners — "brand", "status" and "greys" say what each set is FOR, where
+   primary / secondary / neutral are design-system vocabulary an admin has to translate. */
+const TAB_LABEL: Record<Tab, string> = { primary: 'Brand', secondary: 'Status', neutral: 'Greys' };
 
-export function PortalThemePanel({ theme, onChange }: { theme: PortalTheme; onChange: (patch: Partial<PortalTheme>) => void }) {
+export function PortalThemePanel({ theme, onChange, ownLookCount, onFollowPageStyle }: {
+  theme: PortalTheme;
+  onChange: (patch: Partial<PortalTheme>) => void;
+  ownLookCount?: number;
+  onFollowPageStyle?: () => void;
+}) {
   /* ⚠️ `'font'`, not `'heading' | 'body'`. The two font fields became one and this union was left
      naming the pair — so the type said the font list could never open, which esbuild does not check
      and the panel therefore went on working. Pre-existing, found while flattening the rows. */
@@ -380,7 +504,8 @@ export function PortalThemePanel({ theme, onChange }: { theme: PortalTheme; onCh
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6">
-            <Dropdown
+      <PageStyleSection theme={theme} onChange={onChange} ownLookCount={ownLookCount} onFollowPageStyle={onFollowPageStyle} />
+      <Dropdown
         label="Theme style"
         value={style?.name ?? 'Custom'}
         open={openList === 'style'}
@@ -471,7 +596,7 @@ export function PortalThemePanel({ theme, onChange }: { theme: PortalTheme; onCh
             className={`flex-1 rounded py-1 text-[12px] font-medium capitalize transition-colors ${
               tab === t ? 'bg-white text-[#364658] shadow-[0_1px_2px_rgba(16,24,40,0.06)]' : 'text-[#7B8FA5] hover:text-[#364658]'
             }`}
-          >{t}</button>
+          >{TAB_LABEL[t]}</button>
         ))}
       </div>
 

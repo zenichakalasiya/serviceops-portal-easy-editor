@@ -9,13 +9,13 @@ import {
   AlignLeft, AlignRight, AlignStartHorizontal, AlignStartVertical, StretchHorizontal, StretchVertical,
   ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, Baseline, Bold, Check, ChevronDown, ChevronRight, Columns2, Copy, GripHorizontal, GripVertical, Italic, Link2, Rows2,
   Braces, Highlighter, Maximize2, UnfoldVertical, Move, MoveHorizontal, MoveVertical, Plus, RemoveFormatting,
-  PaintBucket, Replace, SquareDashed, SquareRoundCorner, SquareSquare, Trash2, Underline, X, ImagePlus, Palette, LayoutDashboard, Columns3,
+  PaintBucket, Paintbrush, Replace, SquareDashed, SquareRoundCorner, SquareSquare, Trash2, Underline, X, ImagePlus, Palette, LayoutDashboard, Columns3,
 } from 'lucide-react';
 import { BannerFillEditor, BannerLayoutPanel, OverlayLayerEditor, TilePresetPicker } from './PortalBannerTools';
 import { bannerBoxId, flipRoot, groupOf } from './portalBannerLayout';
 import type { BannerNode } from './portalBannerLayout';
 import { BANNER_GROUPS, bannerGroupGap } from './portalPageModel';
-import { keysForTip, chromeKeys } from './portalShortcutKeys';
+import { keysForTip, chromeKeys, lettersOn } from './portalShortcutKeys';
 import { usePopupArrows, useOpenValue } from './usePopupArrows';
 import { toast } from 'sonner';
 import { MiniRange } from './PortalRange';
@@ -1231,6 +1231,236 @@ function ShadowMenu({ id }: { id: string }) {
   );
 }
 
+/* ── STYLE — one labelled button for the whole look of a block ───────────────────────────────────
+ *
+ * ⚠️ It REPLACES four icon buttons — background, border, corner radius and shadow. Four small squares
+ * on a bar are four things to hover before you know which is which, and a good-looking card needed
+ * all four set in agreement. A non-designer does not want a border weight; they want the card to
+ * look like a card, or like an outline, or like it lifts off the page.
+ *
+ * So the popup opens on LOOKS: six tiles, each the effect itself, each ONE click that sets fill,
+ * border and shadow together. The detailed controls are still there, folded under "Customise", for
+ * the admin who wants a 3px dashed teal edge — nothing an expert could do before has gone.
+ *
+ * ⚠️ With nothing set, the block FOLLOWS THE PAGE STYLE (Theme → Page style), and the popup says so.
+ * "Use page style" is the way back: it DELETES the keys rather than writing today's page values, so
+ * the block goes on following the page when the page style changes.
+ * ⚠️ Corners are NOT part of a look. They are the page's decision (Page style → Corners); a look
+ * that also rounded the card would make one card disagree with the row it sits in.
+ * ⚠️ Two stores, the same routing every control here uses (`fillsFromConfig`). The shadow always
+ * lives in STYLES, whichever store holds the fill. */
+type LookDef = {
+  id: string; label: string;
+  bg: string; border: string | null; shadow: string | null;
+  /** How the tile draws it — the tile IS the effect. */
+  tile: React.CSSProperties;
+};
+const LOOKS: LookDef[] = [
+  { id: 'card', label: 'Card', bg: '#FFFFFF', border: '#E5E7EB', shadow: null,
+    tile: { background: '#FFFFFF', border: '1px solid #E5E7EB' } },
+  { id: 'plain', label: 'Plain', bg: 'rgba(255,255,255,0)', border: null, shadow: null,
+    tile: { background: 'transparent', border: '1px dashed #CBD5E1' } },
+  { id: 'outline', label: 'Outline', bg: 'rgba(255,255,255,0)', border: '#94A3B8', shadow: null,
+    tile: { background: 'transparent', border: '1px solid #94A3B8' } },
+  { id: 'soft', label: 'Soft fill', bg: '#EEF2F6', border: null, shadow: null,
+    tile: { background: '#E6EBF1', border: '1px solid transparent' } },
+  { id: 'tinted', label: 'Tinted', bg: 'var(--portal-tone-wash, #EBF5FF)', border: 'var(--portal-tone-line, #CFE3F5)', shadow: null,
+    tile: { background: 'var(--portal-tone-wash, #EBF5FF)', border: '1px solid var(--portal-tone-line, #CFE3F5)' } },
+  { id: 'raised', label: 'Raised', bg: '#FFFFFF', border: null, shadow: 'rgba(16,24,40,0.12)',
+    tile: { background: '#FFFFFF', border: '1px solid transparent', boxShadow: '0 4px 10px -2px rgba(16,24,40,0.22)' } },
+];
+const LOOK_SHADOWS: { key: string; label: string; color: string | null }[] = [
+  { key: 'none', label: 'None', color: null },
+  { key: 'soft', label: 'Soft', color: 'rgba(16,24,40,0.06)' },
+  { key: 'medium', label: 'Medium', color: 'rgba(16,24,40,0.12)' },
+  { key: 'strong', label: 'Strong', color: 'rgba(16,24,40,0.20)' },
+];
+/* The keys "Use page style" deletes, per store. */
+const STYLE_BOX_KEYS = ['bgFill', 'bg', 'dark:bg', 'borderMode', 'borderWidth', 'borderColor', 'dark:borderColor', 'borderStyle', 'radius', 'elevation', 'shadowOn', 'shadowColor', 'shadowType', 'shadowPos'];
+const CFG_BOX_KEYS = ['fill', 'bg', 'dark:bg', 'borderWidth', 'borderColor', 'dark:borderColor', 'radius'];
+
+function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
+  const { styles, setStyle, cfg, setCfg } = useCanvas();
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(false);
+  const [at, setAt] = useState<{ rect: DOMRect; key: 'bg' | 'borderColor' } | null>(null);
+  const bgRef = useRef<HTMLButtonElement>(null);
+  const edgeRef = useRef<HTMLButtonElement>(null);
+  const viaCfg = fillsFromConfig(id);
+  const box = ((viaCfg ? cfg?.(id) : styles[id]) ?? {}) as Record<string, unknown>;
+  const st = (styles[id] ?? {}) as Record<string, unknown>;
+
+  const putBox = (patch: Record<string, unknown>) => (viaCfg ? setCfg?.(id, patch) : setStyle(id, patch as never));
+  const putStyle = (patch: Record<string, unknown>) => setStyle(id, patch as never);
+
+  const filled = viaCfg ? box.fill === 'color' : box.bgFill === 'color';
+  const bgNow = filled ? String(box.bg ?? '#FFFFFF') : null;
+  const bw = Number(box.borderWidth ?? 0);
+  const borderNow = viaCfg
+    ? (bw > 0 && box.borderColor !== 'transparent' ? String(box.borderColor ?? '#E5E7EB') : null)
+    : (box.borderMode === 'none' ? null : bw > 0 ? String(box.borderColor ?? '#E5E7EB') : null);
+  const shadowNow = st.shadowOn === true ? String(st.shadowColor ?? '') : null;
+  const ownKeys = (viaCfg ? CFG_BOX_KEYS.some((k) => box[k] !== undefined && !(k === 'fill' && box[k] === 'none')) : false)
+    || STYLE_BOX_KEYS.some((k) => st[k] !== undefined);
+  const current = ownKeys
+    ? LOOKS.find((l) => l.bg === bgNow && l.border === borderNow && (l.shadow ?? null) === shadowNow)?.id ?? 'custom'
+    : 'page';
+
+  const applyLook = (l: LookDef) => {
+    if (boxOk) {
+      if (viaCfg) {
+        /* ⚠️ A config-filled box only draws a border while its width is above 0, and a width of 0
+           leaves the card's RESTING hairline in place — so "no border" is a 1px transparent one. */
+        putBox({ fill: 'color', bg: l.bg, borderWidth: 1, borderColor: l.border ?? 'transparent' });
+      } else {
+        putBox(l.border
+          ? { bgFill: 'color', bg: l.bg, borderMode: 'line', borderWidth: 1, borderStyle: 'solid', borderColor: l.border }
+          : { bgFill: 'color', bg: l.bg, borderMode: 'none' });
+      }
+    }
+    /* `elevation: 'flat'` is what takes a card's RESTING shadow off — without it, "Plain" would still
+       float on the shadow its class draws. */
+    putStyle(l.shadow
+      ? { shadowOn: true, shadowColor: l.shadow, shadowType: 'outer', shadowPos: 'bottom', elevation: undefined }
+      : { shadowOn: false, elevation: 'flat' });
+  };
+  const usePage = () => {
+    if (viaCfg) setCfg?.(id, Object.fromEntries(CFG_BOX_KEYS.map((k) => [k, undefined])));
+    putStyle(Object.fromEntries(STYLE_BOX_KEYS.map((k) => [k, undefined])));
+  };
+
+  const setBg = (v: string) => putBox(viaCfg ? { fill: 'color', bg: v } : { bgFill: 'color', bg: v });
+  const setBorderWidth = (v: number) => putBox(viaCfg
+    ? { borderWidth: v, ...(box.borderColor === 'transparent' ? { borderColor: '#E5E7EB' } : {}) }
+    : { borderWidth: v, borderMode: v > 0 ? 'line' : 'none', borderStyle: String(box.borderStyle ?? 'solid') });
+  const setBorderColor = (v: string) => putBox(viaCfg ? { borderColor: v } : { borderColor: v, borderMode: 'line' });
+  const radius = Number(box.radius ?? 8);
+  const shadowKey = st.shadowOn !== true ? 'none' : LOOK_SHADOWS.find((s) => s.color === String(st.shadowColor ?? ''))?.key ?? 'custom';
+
+  const bgShown = bgNow && !bgNow.startsWith('var(') ? bgNow : '#FFFFFF';
+  const edgeShown = borderNow && !borderNow.startsWith('var(') ? borderNow : '#E5E7EB';
+  const pairBg = colorPair(filled ? box : {}, 'bg', '#FFFFFF', putBox, viaCfg ? { fill: 'color' } : { bgFill: 'color' });
+  const pairEdge = colorPair(box, 'borderColor', '#E5E7EB', putBox, viaCfg ? {} : { borderMode: 'line' });
+
+  const label = (t: string) => <p className="mb-1 mt-3 text-[11px] font-medium text-[#7B8FA5] first:mt-0">{t}</p>;
+  const swatchBtn = (ref: React.RefObject<HTMLButtonElement | null>, value: string, key: 'bg' | 'borderColor', text: string) => (
+    <button
+      ref={ref}
+      onClick={() => setAt(at?.key === key ? null : { rect: ref.current!.getBoundingClientRect(), key })}
+      className="flex h-8 w-full items-center gap-2 rounded border border-[#DFE5ED] px-2 text-left text-[12px] text-[#364658] transition-colors hover:bg-[#F5F7FA]"
+    >
+      <span className="size-4 flex-shrink-0 rounded-[3px] border border-[#CBD5E1]" style={{ background: value }} />
+      <span className="truncate">{text}</span>
+    </button>
+  );
+
+  return (
+    <div className="relative">
+      <button
+        className={`${textBtn} ${open ? 'bg-[var(--bar-on-bg,#EBF5FF)] text-[var(--bar-on-ink,#3D8BD0)]' : ''}`}
+        data-tip="Style — how this block looks"
+        onClick={() => { setAt(null); setOpen((x) => !x); }}
+      ><Paintbrush size={14} />Style<ChevronDown size={12} className="text-[#9CA3AF]" /></button>
+      {open && (
+        <>
+          <span className="fixed inset-0 z-[60]" onClick={() => { setOpen(false); setAt(null); }} />
+          <div className="absolute left-0 top-[calc(100%+6px)] z-[61] w-[280px] rounded-lg border border-[#E5E7EB] bg-white shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]">
+            <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
+              <p className="text-[12.5px] font-semibold text-[#1E293B]">Style</p>
+              {current === 'page' ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-2 py-0.5 text-[10.5px] font-medium text-[#067647]">
+                  <Check size={10} /> Follows page style
+                </span>
+              ) : (
+                <button onClick={usePage} className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[#3D8BD0] transition-colors hover:bg-[#EBF5FF]">
+                  Use page style
+                </button>
+              )}
+            </div>
+            {boxOk && (
+              <div className="grid grid-cols-3 gap-2 px-3">
+                {LOOKS.map((l) => (
+                  <button key={l.id} onClick={() => applyLook(l)} className="group flex min-w-0 flex-col items-center gap-1">
+                    <span className={`flex h-[48px] w-full items-center justify-center rounded-md border-2 bg-[#F4F6FA] transition-colors ${
+                      current === l.id ? 'border-[#3D8BD0]' : 'border-transparent group-hover:border-[#CBD5E1]'
+                    }`}>
+                      <span className="flex h-[28px] w-[44px] flex-col justify-center gap-[3px] rounded-[5px] px-1.5" style={l.tile}>
+                        <span className="h-[3px] w-4/5 rounded-full bg-[#94A3B8]/60" />
+                        <span className="h-[3px] w-1/2 rounded-full bg-[#94A3B8]/35" />
+                      </span>
+                    </span>
+                    <span className={`truncate text-[11px] ${current === l.id ? 'font-semibold text-[#3D8BD0]' : 'text-[#64748B]'}`}>{l.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {/* Shadow alone, for blocks whose box this bar cannot paint (a button, an icon badge). */}
+            {!boxOk && (
+              <div className="px-3">
+                {label('Shadow')}
+                <div className="pill-track">
+                  {LOOK_SHADOWS.map((s) => (
+                    <button key={s.key} aria-pressed={shadowKey === s.key}
+                      onClick={() => putStyle(s.color ? { shadowOn: true, shadowColor: s.color, shadowType: 'outer', shadowPos: 'bottom' } : { shadowOn: false })}
+                      className="flex-1 rounded py-1 text-[11.5px] font-medium text-[#7B8FA5]">{s.label}</button>
+                  ))}
+                </div>
+              </div>
+            )}
+            {boxOk && (
+              <>
+                <button
+                  onClick={() => setCustom((x) => !x)}
+                  className="mt-3 flex w-full items-center gap-1.5 border-t border-[#F0F2F5] px-3 py-2.5 text-left text-[12px] font-medium text-[#364658] transition-colors hover:bg-[#F8FAFC]"
+                >
+                  <ChevronRight size={13} className={`text-[#94A3B8] transition-transform ${custom ? 'rotate-90' : ''}`} />
+                  Customise
+                  <span className="ml-auto text-[11px] font-normal text-[#9CA3AF]">colour, edge, corners, shadow</span>
+                </button>
+                {custom && (
+                  <div className="border-t border-[#F0F2F5] px-3 pb-3 pt-2.5">
+                    {label('Background')}
+                    {swatchBtn(bgRef, bgNow ?? 'transparent', 'bg', bgNow ? (bgNow.startsWith('var(') ? 'Theme tint' : bgNow) : 'Page style')}
+                    {label('Edge')}
+                    <div className="flex items-center gap-2">
+                      <MiniRange min={0} max={8} value={borderNow ? bw : 0} label="Border weight" onChange={setBorderWidth} />
+                      <span className="w-9 text-right text-[12px] tabular-nums text-[#364658]">{borderNow ? bw : 0}px</span>
+                    </div>
+                    {!!borderNow && <div className="mt-2">{swatchBtn(edgeRef, borderNow, 'borderColor', borderNow.startsWith('var(') ? 'Theme tint' : borderNow)}</div>}
+                    {label('Corners')}
+                    <div className="flex items-center gap-2">
+                      <MiniRange min={0} max={32} value={radius} label="Corner radius" onChange={(v) => putBox({ radius: v })} />
+                      <span className="w-9 text-right text-[12px] tabular-nums text-[#364658]">{radius}px</span>
+                    </div>
+                    {label('Shadow')}
+                    <div className="pill-track">
+                      {LOOK_SHADOWS.map((s) => (
+                        <button key={s.key} aria-pressed={shadowKey === s.key}
+                          onClick={() => putStyle(s.color ? { shadowOn: true, shadowColor: s.color, shadowType: 'outer', shadowPos: 'bottom', elevation: undefined } : { shadowOn: false, elevation: 'flat' })}
+                          className="flex-1 rounded py-1 text-[11.5px] font-medium text-[#7B8FA5]">{s.label}</button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          {at && (
+            <PortalColorPicker
+              key={at.key}
+              value={at.key === 'bg' ? bgShown : edgeShown}
+              pair={at.key === 'bg' ? pairBg : pairEdge}
+              anchor={at.rect}
+              onChange={(v) => (at.key === 'bg' ? setBg(v) : setBorderColor(v))}
+              onClose={() => setAt(null)}
+            />
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function ButtonStyleMenu({ id }: { id: string }) {
   const { cfg, setCfg } = useCanvas();
   const [open, setOpen] = useState(false);
@@ -1908,10 +2138,9 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
           paints behind the thing you are looking at and that no design reads as part of itself. The
           badge's own colour, corners and border are in the Icon popup below.
           A TILE keeps all four: there the card and the badge inside it are two real boxes. */}
-      {(kind !== 'text' || placed) && !isButton && !isIcon && <ColorMenu id={id} />}
-      {(kind !== 'text' || placed) && !isButton && !isIcon && <BorderMenu id={id} />}
-      {(kind !== 'text' || placed) && !isButton && !isIcon && <RadiusMenu id={id} />}
-      {(kind !== 'text' || placed) && <ShadowMenu id={id} />}
+      {/* ⚠️ ONE labelled Style button where there were four icons — see `StyleMenu`. A button and an
+          icon badge keep only the shadow inside it: their box is painted from elsewhere. */}
+      {(kind !== 'text' || placed) && <StyleMenu id={id} boxOk={!isButton && !isIcon} />}
       {caps.remove !== false && <Rule />}
       {caps.remove !== false && (
         <button
@@ -3665,7 +3894,7 @@ export function AddSectionSeam({ afterId }: { afterId: string }) {
             onClick={() => setPicking((p) => !p)}
             className="inline-flex h-7 items-center rounded-full bg-[#3D8BD0] px-3.5 text-[12px] font-medium text-white shadow-sm transition-colors hover:bg-[#2d6ca0]"
           >+ Add Section</button>
-          </TooltipTrigger><TooltipContent><TipKeys label="Add a section" keys={chromeKeys('newSection')} /></TooltipContent></Tooltip>
+          </TooltipTrigger><TooltipContent><TipKeys label="Add a section" keys={lettersOn() ? chromeKeys('newSection') : []} /></TooltipContent></Tooltip>
           <span
             onMouseDown={beginResize}
             data-tip="Drag to stretch the section above"

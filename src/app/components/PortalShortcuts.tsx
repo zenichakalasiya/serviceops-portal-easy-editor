@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { Keyboard, X } from 'lucide-react';
 import { useCanvas } from './PortalCanvas';
 import { nodePath } from './portalPageModel';
-import { TOOLBAR_KEYS, chromeKeys, tipsOf } from './portalShortcutKeys';
+import { TOOLBAR_KEYS, chromeKeys, lettersOn, setLettersOn, tipsOf } from './portalShortcutKeys';
 import type { ChromeAction, ToolbarAction } from './portalShortcutKeys';
 
 /* Support Portal builder — keyboard shortcuts, and the sheet that lists them.
@@ -168,6 +168,10 @@ export function PortalShortcuts(props: PortalShortcutProps) {
 
       /* CHROME_KEYS.newSection — N, BEFORE the selection gate. It is the first step of building a
          page, so it has to work on an empty one: with nothing selected it lands at the page's foot. */
+      /* ⚠️ Bare letters (N included) answer only once they are switched on — see `lettersOn`. Shift+A
+         is a letter too; the arrows, Delete, Enter and Esc below are not, and stay on. */
+      if (/^Key[A-Z]$/.test(e.code) && !e.altKey && !lettersOn()) return;
+
       if (e.code === 'KeyN' && !e.altKey && !e.shiftKey) { e.preventDefault(); props.onAddSection(selectedId); return; }
 
       if (!selectedId) return;
@@ -236,10 +240,10 @@ export function PortalShortcuts(props: PortalShortcutProps) {
         case 'KeyA': e.preventDefault(); (e.shiftKey ? pressAddInside() : act('addBeside')); break;
         case 'KeyR': e.preventDefault(); act('replace'); break;
         case 'KeyS': e.preventDefault(); act('split'); break;
-        case 'KeyD': e.preventDefault(); act('shadow'); break;
         case 'Enter': if (editWords(id)) e.preventDefault(); break;
         case 'Delete': case 'Backspace': e.preventDefault(); act('remove'); break;
         /* style */
+        case 'KeyL': e.preventDefault(); act('style'); break;
         case 'KeyB': e.preventDefault(); act('background'); break;
         case 'KeyO': e.preventDefault(); act('border'); break;
         case 'KeyC': e.preventDefault(); act('radius'); break;
@@ -326,10 +330,10 @@ const MOVE: Group = { title: 'Move and size', note: 'Only the parent’s own axi
 ] };
 
 const STYLE: Group = { title: 'Style', note: 'Each opens its popup — arrows walk it', rows: [
-  { keys: k('background'), label: 'Background colour' },
-  { keys: k('border'), label: 'Border' },
-  { keys: k('radius'), label: 'Corner radius' },
-  { keys: k('shadow'), label: 'Drop shadow' },
+  { keys: k('style'), label: 'Style — looks, colour, edge, shadow' },
+  { keys: k('background'), label: 'Banner background' },
+  { keys: k('border'), label: 'Banner border' },
+  { keys: k('radius'), label: 'Banner corners' },
   { keys: k('alignH'), label: 'Horizontal alignment' },
   { keys: k('alignV'), label: 'Vertical alignment' },
   { keys: k('icon'), label: 'Icon — cards and tiles' },
@@ -363,12 +367,12 @@ function Kbd({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ShortcutRow({ keys, label, lead }: Row) {
+function ShortcutRow({ keys, label, lead, off }: Row & { off?: boolean }) {
   return (
     /* ⚠️ The LABEL leads and the KEYS close the row (Zeni's call, 28 Sep 2026). A reader scans a sheet
        for the THING they want to do, then reads off its key — so the words go where the eye starts, and
        the caps line up down the right edge where they can be compared column by column. */
-    <div className="flex items-center justify-between gap-3 py-[3px]">
+    <div className={`flex items-center justify-between gap-3 py-[3px] ${off ? 'opacity-40' : ''}`} title={off ? 'Turn on single-key shortcuts to use this' : undefined}>
       <span className={`min-w-0 flex-1 truncate text-[12px] ${lead ? 'font-semibold text-[#1E293B]' : 'text-[#64748B]'}`}>{label}</span>
       <span className="flex flex-shrink-0 items-center gap-1">
         {keys.map((x, i) => (x === '+' || x === '/'
@@ -379,19 +383,21 @@ function ShortcutRow({ keys, label, lead }: Row) {
   );
 }
 
-function GroupBlock({ g, first }: { g: Group; first: boolean }) {
+function GroupBlock({ g, first, letters }: { g: Group; first: boolean; letters: boolean }) {
   return (
     <div className={first ? '' : 'mt-3 border-t border-[#F0F1F3] pt-2.5'}>
       <div className="mb-1 flex items-baseline justify-between gap-2">
         <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9CA3AF]">{g.title}</span>
         {g.note && <span className="truncate text-[10.5px] text-[#B0BAC6]">{g.note}</span>}
       </div>
-      {g.rows.map((r) => <ShortcutRow key={r.label} {...r} />)}
+      {g.rows.map((r) => <ShortcutRow key={r.label} {...r} off={!letters && r.keys.some((x) => /^[A-Z]$/.test(x)) && !r.keys.some((x) => x === 'Ctrl' || x === 'Alt')} />)}
     </div>
   );
 }
 
 function Sheet({ onClose }: { onClose: () => void }) {
+  const [letters, setLetters] = useState(lettersOn());
+  const flip = () => { setLettersOn(!letters); setLetters(!letters); };
   return createPortal(
     <>
       <div className="fixed inset-0 z-[10050] bg-black/30" onClick={onClose} />
@@ -406,9 +412,18 @@ function Sheet({ onClose }: { onClose: () => void }) {
             </div>
             {/* The one sentence that makes the rest guessable. */}
             <p className="mt-1 text-[11.5px] text-[#7B8FA5]">
-              Alt is the builder, a letter acts on what is selected, arrows move it, Shift resizes it, Ctrl is the document.
+              Alt is the builder, arrows move what is selected, Shift resizes it, Ctrl is the document. Single letters are off until you switch them on.
             </p>
           </div>
+          <label className="ml-auto flex flex-shrink-0 cursor-pointer items-center gap-2 self-center rounded-md border border-[#E5E7EB] px-2.5 py-1.5">
+            <span className="text-[12px] text-[#364658]">Single-key shortcuts</span>
+            <button
+              role="switch"
+              aria-checked={letters}
+              onClick={flip}
+              className={`relative h-[18px] w-8 rounded-full transition-colors ${letters ? 'bg-[#3D8BD0]' : 'bg-[#CBD5E1]'}`}
+            ><span className={`absolute top-[2px] size-[14px] rounded-full bg-white shadow transition-all ${letters ? 'left-[16px]' : 'left-[2px]'}`} /></button>
+          </label>
           <button onClick={onClose} aria-label="Close" className="flex size-8 flex-shrink-0 items-center justify-center rounded text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#111827]">
             <X size={18} />
           </button>
@@ -419,7 +434,7 @@ function Sheet({ onClose }: { onClose: () => void }) {
             <div key={ri} className={`grid grid-cols-2 gap-x-8 py-3.5 ${ri ? 'border-t border-[#E5E7EB]' : ''}`}>
               {row.map((col, ci) => (
                 <div key={ci} className="min-w-0">
-                  {col.map((g, gi) => <GroupBlock key={g.title} g={g} first={gi === 0} />)}
+                  {col.map((g, gi) => <GroupBlock key={g.title} g={g} first={gi === 0} letters={letters} />)}
                 </div>
               ))}
             </div>

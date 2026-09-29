@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { Link2, Link2Off, MoveHorizontal, MoveVertical } from 'lucide-react';
+import { ChevronRight, Link2, Link2Off, MoveHorizontal, MoveVertical } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { NodeStyle, SpacingBox } from './portalPageModel';
 
@@ -292,7 +292,7 @@ export function SpacingMatrix({ style, onChange, only, resting, nodeId }: Props)
   /** The ring's name and its chain — ONE header for both views, so they cannot drift apart. */
   const head = (r: Ring, trailing?: ReactNode) => (
     <div className="mb-1.5 flex items-center gap-1">
-      <span className="flex-1 text-[11px] font-semibold uppercase tracking-wider text-[#7B8FA5]">{r}</span>
+      <span className="flex-1 text-[11px] font-semibold uppercase tracking-wider text-[#7B8FA5]">{r === 'margin' ? 'Space around' : 'Space inside'}</span>
       <LinkToggle on={linked(r)} onToggle={() => toggleLink(r)} />
       {trailing}
     </div>
@@ -355,6 +355,78 @@ export function SpacingMatrix({ style, onChange, only, resting, nodeId }: Props)
     <div>
       {rings.map(twoFields)}
       {nodeId && hint && <SpacingHint nodeId={nodeId} ring={hint.ring} side={hint.side} />}
+    </div>
+  );
+}
+
+/* ── SPACING IN THREE SIZES ───────────────────────────────────────────────────────────────────────
+ *
+ * What an admin who is not a designer actually decides: a little room, some room, a lot of room —
+ * inside the block and around it. Nobody should have to know that the first is called padding, the
+ * second margin, or that either is measured in pixels, to make a card breathe.
+ *
+ * ⚠️ AUTO is the block as it rests (its own classes), and it is written by DELETING the key, so the
+ * block goes on following the page's spacing. S / M / L write every side at once.
+ * ⚠️ "Around" moves only the TOP and BOTTOM. A left/right margin on a card in a row takes width from
+ * the row, which reads as the card shrinking rather than breathing — the exact values below still
+ * reach the sides for anyone who means it.
+ * ⚠️ The exact-values control is not gone, it is folded: it opens by itself whenever the block
+ * already carries values the three sizes cannot describe, so nothing is ever hidden that is set. */
+const INSIDE = { S: 8, M: 16, L: 24 } as const;
+const AROUND = { S: 8, M: 16, L: 32 } as const;
+type Size = 'auto' | 'S' | 'M' | 'L' | 'custom';
+
+function sizeOfInside(p: SpacingBox | undefined): Size {
+  if (!p || Object.values(p).every((v) => v === undefined)) return 'auto';
+  const all = [p.top, p.right, p.bottom, p.left];
+  for (const k of ['S', 'M', 'L'] as const) if (all.every((v) => v === INSIDE[k])) return k;
+  return 'custom';
+}
+function sizeOfAround(m: SpacingBox | undefined): Size {
+  if (!m || Object.values(m).every((v) => v === undefined)) return 'auto';
+  const sidesFree = (m.left === undefined || m.left === 0) && (m.right === undefined || m.right === 0);
+  for (const k of ['S', 'M', 'L'] as const) if (sidesFree && m.top === AROUND[k] && m.bottom === AROUND[k]) return k;
+  return 'custom';
+}
+
+export function SimpleSpacing(props: Props) {
+  const { style, onChange, only } = props;
+  const inside = sizeOfInside(style.padding);
+  const around = sizeOfAround(style.margin);
+  const [exact, setExact] = useState(inside === 'custom' || around === 'custom');
+  const row = (label: string, hint: string, value: Size, pick: (s: Size) => void) => (
+    <div className="mt-3 first:mt-1">
+      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <span className="text-[12px] font-medium text-[#364658]">{label}</span>
+        <span className="text-[11px] text-[#9CA3AF]">{value === 'custom' ? 'Custom values' : hint}</span>
+      </div>
+      <div className="pill-track">
+        {(['auto', 'S', 'M', 'L'] as const).map((s) => (
+          <button
+            key={s}
+            aria-pressed={value === s}
+            onClick={() => pick(s)}
+            title={s === 'auto' ? 'As the block rests — follows the page' : s === 'S' ? 'Small' : s === 'M' ? 'Medium' : 'Large'}
+            className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5]"
+          >{s === 'auto' ? 'Auto' : s}</button>
+        ))}
+      </div>
+    </div>
+  );
+  return (
+    <div>
+      {only !== 'margin' && row('Space inside', 'Between the edge and the content', inside, (s) =>
+        onChange({ padding: s === 'auto' ? undefined : { top: INSIDE[s as 'S'], right: INSIDE[s as 'S'], bottom: INSIDE[s as 'S'], left: INSIDE[s as 'S'] } } as Partial<NodeStyle>))}
+      {only !== 'padding' && row('Space around', 'Above and below the block', around, (s) =>
+        onChange({ margin: s === 'auto' ? undefined : { top: AROUND[s as 'S'], bottom: AROUND[s as 'S'] } } as Partial<NodeStyle>))}
+      <button
+        onClick={() => setExact((x) => !x)}
+        className="mt-3 flex items-center gap-1 text-[11.5px] font-medium text-[#3D8BD0] hover:underline"
+      >
+        <ChevronRight size={12} className={`transition-transform ${exact ? 'rotate-90' : ''}`} />
+        {exact ? 'Hide exact values' : 'Exact values'}
+      </button>
+      {exact && <SpacingMatrix {...props} />}
     </div>
   );
 }

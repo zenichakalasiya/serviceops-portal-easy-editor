@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, Eye, HelpCircle, RotateCcw,
+  ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, Eye, HelpCircle, MoreHorizontal, RotateCcw, TriangleAlert,
   Palette, PanelRight, Paintbrush, Pencil, Plus, Redo2, Undo2, X, LayoutPanelTop,
 } from 'lucide-react';
 import { PortalBannersPanel } from './PortalBannersPanel';
@@ -19,7 +19,7 @@ import { PortalBrandingPanel } from './PortalBrandingPanel';
 import { PRESETS, isRowAxis, presetOf } from './PortalSectionLayout';
 import type { PresetId } from './PortalSectionLayout';
 import { PortalThemePanel, DEFAULT_THEME, buttonOf, packOf, paletteOf, swatchesOf, faceOf, ThemeModeToggle } from './PortalThemePanel';
-import { setPortalColorMode } from './portalStyleResolver';
+import { BOX_STYLE_KEYS, kitClass, setPortalColorMode, setPortalKit } from './portalStyleResolver';
 import type { PortalTheme } from './PortalThemePanel';
 import { PortalElementPanel } from './PortalElementPanel';
 import { CanvasProvider } from './PortalCanvas';
@@ -248,6 +248,9 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
   /* The split CTA's menu. Closed by default — the chevron is an admission that a second option
      exists, not an invitation to read it every time. */
   const [pubMenu, setPubMenu] = useState(false);
+  /* The top bar's ⋯ menu, and the confirm that stands in front of Reset. */
+  const [moreMenu, setMoreMenu] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
   /* Which action the split button's main half is currently offering. Publish by default.
      ⚠️ The memory only ever runs in the SAFE direction here. The default is the live one, so the
      only thing remembering can do is leave the button on "Save as draft" — pressing it expecting to
@@ -3030,6 +3033,8 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
      being threaded through every one of them — a parameter that missed a single call site would
      leave one control quietly reading the wrong half of a colour pair. */
   setPortalColorMode(theme.mode);
+  /* The page-wide style kit — set here for the same reason as the mode: before anything reads it. */
+  setPortalKit(theme.kit);
   const themeSw = swatchesOf(theme);
   /* ⚠️ The accent is the PALETTE's accent slot, full stop. Deferring to the page's own `accent` prop
      for one palette meant picking ServiceOps-light silently produced a different colour from the one
@@ -3097,7 +3102,34 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
     </div>
   );
 
-  const themeClass = `portal-themed ${theme.mode === 'dark' ? 'portal-dark' : ''}`;
+  const themeClass = `portal-themed ${theme.mode === 'dark' ? 'portal-dark' : ''} ${kitClass(theme.kit)}`;
+
+  /* ── Blocks with a look of their own ─────────────────────────────────────────────────────────
+     The page style is a DEFAULT, so a card somebody styled by hand keeps its look (Zeni's call).
+     The Theme panel says how many there are and offers one click to hand them back to the page —
+     otherwise a kit change that 'does nothing' to three cards reads as a broken control.
+     ⚠️ Two stores, as everywhere: most blocks keep their box in STYLES, the action cards keep
+     their fill, border and corners in widget CONFIG (`fillCss`). */
+  const QUICK_BOX = ['fill', 'bg', 'borderWidth', 'borderColor', 'radius'] as const;
+  const ownLookIds = [
+    ...Object.entries(styles).filter(([, st]) => st && BOX_STYLE_KEYS.some((k) => (st as Record<string, unknown>)[k] !== undefined)).map(([id]) => id),
+    ...Object.entries(widgetCfg).filter(([id, c]) => /^quick-[a-z]+$/.test(id) && c && QUICK_BOX.some((k) => (c as Record<string, unknown>)[k] !== undefined)).map(([id]) => id),
+  ];
+  const ownLookCount = new Set(ownLookIds).size;
+  const followPageStyle = () => {
+    setStyles((prev) => Object.fromEntries(Object.entries(prev).map(([id, st]) => {
+      const next = { ...(st as Record<string, unknown>) };
+      BOX_STYLE_KEYS.forEach((k) => { delete next[k]; });
+      return [id, next];
+    })) as PortalStyles);
+    setWidgetCfg((prev) => Object.fromEntries(Object.entries(prev).map(([id, c]) => {
+      if (!/^quick-[a-z]+$/.test(id)) return [id, c];
+      const next = { ...(c as Record<string, unknown>) };
+      QUICK_BOX.forEach((k) => { delete next[k]; });
+      return [id, next];
+    })) as typeof prev);
+    toast.success('Every block now follows the page style');
+  };
 
   const iconBtn = 'flex size-8 items-center justify-center rounded text-[#64748B] transition-colors hover:bg-[#F3F4F6] hover:text-[#364658]';
   const divider = <span className="mx-1 h-5 w-px bg-[#E5E7EB]" />;
@@ -3274,14 +3306,64 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
 
           {divider}
 
-          {/* ⚠️ Bordered secondary, not a third plain text button. Reset throws away every edit on
-              the page, so it must not sit in the same visual class as Preview, which throws away
-              nothing — the weight is the warning. */}
-          <button
-            onClick={resetPage}
-            title="Put every block, style and setting back to the page's default"
-            className="ml-1 inline-flex h-8 items-center rounded border border-[#DFE5ED] bg-white px-3 text-[13px] font-medium text-[#364658] transition-colors hover:bg-[#F5F7FA]"
-          >Reset to default</button>
+          {/* ⚠️ RESET LIVES IN A ⋯ MENU NOW, behind a confirm. It sat between the mode switch and
+              Preview, looking exactly like Preview — and one of them throws away nothing while the
+              other throws away the whole design. A destructive action one mis-click from the most
+              used button on the screen is the fault; moving it out of reach and asking first is the
+              fix, and the menu is where the next rarely-used page action can go too. */}
+          <div className="relative ml-1">
+            <Tooltip delayDuration={0}><TooltipTrigger asChild>
+              <button
+                onClick={() => setMoreMenu((v) => !v)}
+                aria-label="More page actions"
+                className={`inline-flex size-8 items-center justify-center rounded border border-[#DFE5ED] bg-white text-[#64748B] transition-colors hover:bg-[#F5F7FA] ${moreMenu ? 'bg-[#F5F7FA] text-[#364658]' : ''}`}
+              ><MoreHorizontal size={16} /></button>
+            </TooltipTrigger><TooltipContent>More page actions</TooltipContent></Tooltip>
+            {moreMenu && (
+              <>
+                <span className="fixed inset-0 z-[80]" onClick={() => setMoreMenu(false)} />
+                <div className="absolute right-0 top-[calc(100%+4px)] z-[81] w-[240px] rounded-lg border border-[#E5E7EB] bg-white p-1 shadow-[0_12px_24px_-6px_rgba(16,24,40,0.18)]">
+                  <button
+                    onClick={() => { setMoreMenu(false); setConfirmReset(true); }}
+                    className="flex w-full items-start gap-2.5 rounded px-2.5 py-2 text-left transition-colors hover:bg-[#FEF3F2]"
+                  >
+                    <RotateCcw size={15} className="mt-0.5 flex-shrink-0 text-[#D92D20]" />
+                    <span className="min-w-0">
+                      <span className="block text-[12.5px] font-medium text-[#B42318]">Reset page to default</span>
+                      <span className="block text-[11.5px] leading-[1.45] text-[#7B8FA5]">Removes every change on this page</span>
+                    </span>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+          {confirmReset && (
+            <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-6" onClick={() => setConfirmReset(false)}>
+              <div className="w-[420px] max-w-full rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+                <div className="flex items-start gap-3 px-5 pb-2 pt-5">
+                  <span className="flex size-9 flex-shrink-0 items-center justify-center rounded-full bg-[#FEF3F2] text-[#D92D20]"><TriangleAlert size={18} /></span>
+                  <div className="min-w-0">
+                    <h2 className="text-[15px] font-semibold text-[#1E293B]">Reset this page to default?</h2>
+                    <p className="mt-1.5 text-[13px] leading-[1.6] text-[#64748B]">
+                      Every block, style, banner and setting on this page goes back to how it started. Your theme is kept.
+                      You can still undo this with <span className="font-medium text-[#364658]">Ctrl + Z</span>.
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-3 flex justify-end gap-2 border-t border-[#e5e7eb] px-5 py-3">
+                  <button
+                    autoFocus
+                    onClick={() => setConfirmReset(false)}
+                    className="inline-flex h-8 items-center rounded border border-[#DFE5ED] bg-white px-3.5 text-[13px] font-medium text-[#364658] transition-colors hover:bg-[#F5F7FA]"
+                  >Keep my changes</button>
+                  <button
+                    onClick={() => { setConfirmReset(false); resetPage(); }}
+                    className="inline-flex h-8 items-center rounded bg-[#D92D20] px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-[#B42318]"
+                  >Reset page</button>
+                </div>
+              </div>
+            </div>
+          )}
           {/* ⚠️ The same bordered secondary as Reset to default. It was the only bare-text control in a
               row of three, so the bar read as two buttons and a word rather than as a set of
               actions — and the least destructive of the three looked the least like something you
@@ -3504,7 +3586,7 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
                 />
               </div>
             ) : active === 'theme' ? (
-              <div className="flex min-h-0 flex-1 flex-col"><PortalThemePanel theme={theme} onChange={(patch) => setTheme((t) => ({ ...t, ...patch }))} /></div>
+              <div className="flex min-h-0 flex-1 flex-col"><PortalThemePanel theme={theme} onChange={(patch) => setTheme((t) => ({ ...t, ...patch }))} ownLookCount={ownLookCount} onFollowPageStyle={followPageStyle} /></div>
             ) : active === 'branding' ? (
               <div className="min-h-0 flex-1"><PortalBrandingPanel /></div>
             ) : active === 'banners' ? (

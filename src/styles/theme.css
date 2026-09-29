@@ -772,3 +772,34 @@ body[data-portal-dragging] [data-portal-toolbar] { pointer-events: none; opacity
    words — Zeni's call, 28 Sep 2026. The rule says 10 because the tooltip carries a pixel of slack past
    its content (measured: 10 here = 11 on screen). Unlayered, so it beats the `px-3` on TooltipContent. */
 [data-slot='tooltip-content']:has(> .tip-keys) { padding-right: 10px; }
+
+/* ── The page-wide STYLE KIT (Theme → Page style) ─────────────────────────────────────────────────
+   The theme wrapper carries `portal-kit-look-*`, `portal-kit-corners-*` and `portal-kit-space-*`;
+   every card surface carries `portal-card` and every band `portal-section`. Standard adds no class,
+   so an untouched portal renders exactly as it always did.
+   ⚠️ No !important anywhere. A card styled by hand carries its values INLINE, and inline beats these
+   rules — which is what "hand-styled cards keep their look" means, with no bookkeeping behind it. */
+.portal-kit-look-flat .portal-card { border-color: transparent; box-shadow: none; }
+.portal-kit-look-outlined .portal-card { border: 1px solid #CBD5E1; box-shadow: none; }
+.portal-kit-look-soft .portal-card {
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 18px -6px rgba(16, 24, 40, 0.12);
+}
+.portal-kit-look-raised .portal-card {
+  border-color: transparent;
+  box-shadow: 0 2px 4px -1px rgba(16, 24, 40, 0.06), 0 14px 28px -8px rgba(16, 24, 40, 0.18);
+}
+.portal-dark.portal-kit-look-outlined .portal-card { border-color: #33466A; }
+.portal-dark.portal-kit-look-soft .portal-card,
+.portal-dark.portal-kit-look-raised .portal-card { box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55); }
+
+.portal-kit-corners-sharp .portal-card { border-radius: 4px; }
+.portal-kit-corners-rounded .portal-card { border-radius: 12px; }
+.portal-kit-corners-round .portal-card { border-radius: 20px; }
+
+/* Only the band's inset — the gap BETWEEN cards is inline and follows `kitGap()`. A band that sets
+   its own top padding for a reason (the search floating over the Quick Actions row) keeps it. */
+.portal-kit-space-compact .portal-section { padding-left: 16px; padding-right: 16px; }
+.portal-kit-space-compact .portal-section:not([class*=" pt-"]) { padding-top: 8px; padding-bottom: 8px; }
+.portal-kit-space-spacious .portal-section { padding-left: 32px; padding-right: 32px; }
+.portal-kit-space-spacious .portal-section:not([class*=" pt-"]) { padding-top: 20px; padding-bottom: 20px; }

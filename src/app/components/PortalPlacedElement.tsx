@@ -101,7 +101,7 @@ function Surface({ children, id }: { children: React.ReactNode; id: string }) {
     pad ? "" : "p-4",
     /* `h-full` so the card takes the height the wrapper was dragged to. Harmless without one —
        a percentage height against an auto-height parent resolves to auto. */
-    "flex h-full flex-col",
+    "portal-card flex h-full flex-col",
   ].filter(Boolean).join(" ");
   return <div data-surface="" className={cls} style={css}>{children}</div>;
 }

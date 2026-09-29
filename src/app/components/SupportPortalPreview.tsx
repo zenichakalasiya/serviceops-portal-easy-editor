@@ -20,7 +20,7 @@ import { HUGS_CONTENT, bannerGroupGap, inBanner } from './portalPageModel';
 import { bannerGradientOf, bannerLayerCss, gradientCss } from './PortalBannerTools';
 import type { BannerDecor } from './portalBannerTemplates';
 import { ImagePlus } from 'lucide-react';
-import { PAGE_ID, chosen, iconBoxCss, roleStyle } from './portalStyleResolver';
+import { PAGE_ID, chosen, iconBoxCss, kitGap, roleStyle } from './portalStyleResolver';
 import { bannerLayout } from './supportPortalData';
 import { shadowCss } from './PortalBoxControls';
 import { PlacedBlockRenderers, PortalPlacedElement } from './PortalPlacedElement';
@@ -517,7 +517,7 @@ function ColumnBody({ id, item, band, live, dir, icons, placedText, cfg }: { id:
    other one was inset by 24px: it looked unaligned because it WAS, by exactly the padding.
    Half-vertical is the whole point — the horizontal gutter is the page's widest measure, so tying
    the vertical to it makes the page one rhythm rather than two. */
-export const SECTION_PAD = 'px-6 py-3';
+export const SECTION_PAD = 'portal-section px-6 py-3';
 
 /* The rendered node for each built-in band this page is HOSTING inside a section tree.
  *
@@ -1591,14 +1591,14 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
      so switching a row to Fixed changes nothing on screen: the columns hold the widths they already
      had, and from that point only what you drag moves. A mode that visibly rearranged the page the
      moment you chose it would be read as having done something wrong. */
-  const share = (cols: number, gap = 16, grow = 1): React.CSSProperties => ({ flex: `${grow} ${grow} calc((100% - ${(cols - 1) * gap}px) / ${cols})` });
+  const share = (cols: number, gap = kitGap(), grow = 1): React.CSSProperties => ({ flex: `${grow} ${grow} calc((100% - ${(cols - 1) * gap}px) / ${cols})` });
 
   /* §7.21 — a section owns its column count, its gap and the air above and below it. Read through
      the widget config so the drawer's sliders move the real band. */
   const secCols = (id: string, fallback: number) => Number(wc(id).cols ?? fallback);
-  const secGap = (id: string) => Number(wc(id).colGap ?? 16);
+  const secGap = (id: string) => Number(wc(id).colGap ?? kitGap());
   /* Row gap, then column gap — the two values of the `gap` shorthand. */
-  const secGapCss = (id: string) => `${Number(wc(id).rowGap ?? wc(id).colGap ?? 16)}px ${secGap(id)}px`;
+  const secGapCss = (id: string) => `${Number(wc(id).rowGap ?? wc(id).colGap ?? kitGap())}px ${secGap(id)}px`;
   /* §Responsive behaviour — how this section's first-layer columns share their row. */
   const secResize = (id: string) => String(wc(id).resize ?? 'fill');
   const secGrow = (id: string) => (secResize(id) === 'fixed' ? 0 : 1);
@@ -2149,7 +2149,7 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
       : card('contact', <div className="p-4">{body}</div>, 1, secGap('work'), 1);
   };
 
-  const card = (id: string, body: ReactNode, cols?: number, gap = 16, grow = 1, orderAt?: number, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => {
+  const card = (id: string, body: ReactNode, cols?: number, gap = kitGap(), grow = 1, orderAt?: number, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => {
     /* ⚠️ A REPLACED built-in card draws its replacement IN ITS OWN SLOT — same order, same share of
        the row, same face. Appending it to the row instead put it beside a work band's main region
        AND its rail, which squeezed every card in the band to a sliver. */
@@ -2185,12 +2185,12 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
     (String(wc(id).titlePlace ?? 'inside') === 'outside' || String(wc(id).display ?? '') === 'image'
       ? 'min-w-0'
       : squareCards
-      ? 'min-w-0 rounded-md border border-[#E5E7EB] bg-white'
+      ? 'portal-card min-w-0 rounded-md border border-[#E5E7EB] bg-white'
       : spineCards
-      ? 'min-w-0 overflow-hidden rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
-      : 'min-w-0 rounded-xl border border-[#E5E7EB] bg-white');
+      ? 'portal-card min-w-0 overflow-hidden rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
+      : 'portal-card min-w-0 rounded-xl border border-[#E5E7EB] bg-white');
 
-  const cardInner = (id: string, body: ReactNode, cols: number | undefined, order: number, gap = 16, grow = 1, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => (
+  const cardInner = (id: string, body: ReactNode, cols: number | undefined, order: number, gap = kitGap(), grow = 1, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => (
     /* ⚠️ No overflow-hidden here. The chip sits at -top-4 and the toolbar at -top-11, both OUTSIDE
        the wrapper — clipping it silently removes the card's hover outline and quick actions. */
     /* ⚠️ `min-w-0` is what makes the row honour its column count. Without it a card's widest
@@ -2543,8 +2543,8 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
                     : opts?.row
                     ? 'rounded-lg border border-[#E6E6E6] bg-white transition-colors hover:border-[#C3CBD6]'
                     : spineCards
-                    ? 'rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
-                    : 'rounded-lg border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.06)]'
+                    ? 'portal-card rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
+                    : 'portal-card rounded-lg border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.06)]'
                 } ${
                   top ? 'flex-col' : stackedLeft ? 'flex-col justify-between' : iconRight ? 'flex-row-reverse items-center' : 'items-center'
                 } ${centre ? 'items-center text-center' : ''}`}
