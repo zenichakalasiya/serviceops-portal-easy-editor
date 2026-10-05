@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { ChevronRight, Link2, Link2Off, MoveHorizontal, MoveVertical } from 'lucide-react';
+import { Link2, Link2Off, MoveHorizontal, MoveVertical, Settings2 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { NodeStyle, SpacingBox } from './portalPageModel';
 
@@ -359,74 +359,120 @@ export function SpacingMatrix({ style, onChange, only, resting, nodeId }: Props)
   );
 }
 
-/* ── SPACING IN THREE SIZES ───────────────────────────────────────────────────────────────────────
- *
- * What an admin who is not a designer actually decides: a little room, some room, a lot of room —
- * inside the block and around it. Nobody should have to know that the first is called padding, the
- * second margin, or that either is measured in pixels, to make a card breathe.
- *
- * ⚠️ AUTO is the block as it rests (its own classes), and it is written by DELETING the key, so the
- * block goes on following the page's spacing. S / M / L write every side at once.
- * ⚠️ "Around" moves only the TOP and BOTTOM. A left/right margin on a card in a row takes width from
- * the row, which reads as the card shrinking rather than breathing — the exact values below still
- * reach the sides for anyone who means it.
- * ⚠️ The exact-values control is not gone, it is folded: it opens by itself whenever the block
- * already carries values the three sizes cannot describe, so nothing is ever hidden that is set. */
-const INSIDE = { S: 8, M: 16, L: 24 } as const;
-const AROUND = { S: 8, M: 16, L: 32 } as const;
-type Size = 'auto' | 'S' | 'M' | 'L' | 'custom';
 
-function sizeOfInside(p: SpacingBox | undefined): Size {
-  if (!p || Object.values(p).every((v) => v === undefined)) return 'auto';
-  const all = [p.top, p.right, p.bottom, p.left];
-  for (const k of ['S', 'M', 'L'] as const) if (all.every((v) => v === INSIDE[k])) return k;
-  return 'custom';
-}
-function sizeOfAround(m: SpacingBox | undefined): Size {
-  if (!m || Object.values(m).every((v) => v === undefined)) return 'auto';
-  const sidesFree = (m.left === undefined || m.left === 0) && (m.right === undefined || m.right === 0);
-  for (const k of ['S', 'M', 'L'] as const) if (sidesFree && m.top === AROUND[k] && m.bottom === AROUND[k]) return k;
+/* ── SPACING IN FOUR SIZES, with Custom per ring ──────────────────────────────────────────────────
+ *
+ * What an admin who is not a designer actually decides: a little room or a lot, inside the block and
+ * around it. Nobody should have to know that the first is padding and the second margin.
+ *
+ * S · M · L · XL = 4 · 6 · 8 · 12 px (Zeni, 5 Oct 2026). There is no Auto button: pressing the lit size
+ * AGAIN clears it, deleting the key so the block goes back to its resting spacing and keeps following
+ * the page — the same "off" a toggle has, without a fifth button that means "none of these".
+ *
+ * ⚠️ Inside moves all four sides. Around moves only TOP and BOTTOM — a left/right margin on a card in
+ * a row takes width from the row, so the last card wraps. The sides are reachable through Custom.
+ *
+ * ⚠️ CUSTOM is an icon on each ring's own heading, opening that ring's four sides — Top · Right ·
+ * Bottom · Left, in CSS order. It opens by itself when the ring already carries values no size
+ * describes, so nothing set is ever hidden. The old two-field "Exact values" matrix is gone from here. */
+const SIZES = { S: 4, M: 6, L: 8, XL: 12 } as const;
+type SizeKey = keyof typeof SIZES;
+type Size = SizeKey | 'auto' | 'custom';
+const SIZE_NAME: Record<SizeKey, string> = { S: 'Small', M: 'Medium', L: 'Large', XL: 'Extra large' };
+const SIDES: Side[] = ['top', 'right', 'bottom', 'left'];
+
+function sizeOfRing(b: SpacingBox | undefined, ring: Ring): Size {
+  if (!b || Object.values(b).every((v) => v === undefined)) return 'auto';
+  for (const k of Object.keys(SIZES) as SizeKey[]) {
+    const v = SIZES[k];
+    if (ring === 'padding' && SIDES.every((s) => b[s] === v)) return k;
+    if (ring === 'margin' && b.top === v && b.bottom === v && !b.left && !b.right) return k;
+  }
   return 'custom';
 }
 
 export function SimpleSpacing(props: Props) {
-  const { style, onChange, only } = props;
-  const inside = sizeOfInside(style.padding);
-  const around = sizeOfAround(style.margin);
-  const [exact, setExact] = useState(inside === 'custom' || around === 'custom');
-  const row = (label: string, hint: string, value: Size, pick: (s: Size) => void) => (
-    <div className="mt-3 first:mt-1">
-      <div className="mb-1.5 flex items-baseline justify-between gap-2">
-        <span className="text-[12px] font-medium text-[#364658]">{label}</span>
-        <span className="text-[11px] text-[#9CA3AF]">{value === 'custom' ? 'Custom values' : hint}</span>
-      </div>
-      <div className="pill-track">
-        {(['auto', 'S', 'M', 'L'] as const).map((s) => (
+  const { style, onChange, only, resting } = props;
+  const sizes = { padding: sizeOfRing(style.padding, 'padding'), margin: sizeOfRing(style.margin, 'margin') };
+  const [custom, setCustom] = useState<Record<Ring, boolean>>({
+    padding: sizes.padding === 'custom',
+    margin: sizes.margin === 'custom',
+  });
+  const write = (ring: Ring, box: SpacingBox | undefined) =>
+    onChange((ring === 'padding' ? { padding: box } : { margin: box }) as Partial<NodeStyle>);
+  const pick = (ring: Ring, k: SizeKey) => {
+    if (sizes[ring] === k) { write(ring, undefined); return; }
+    const v = SIZES[k];
+    write(ring, ring === 'padding' ? { top: v, right: v, bottom: v, left: v } : { top: v, bottom: v });
+  };
+  const setSide = (ring: Ring, side: Side, raw: string) => {
+    const cur = { ...((ring === 'padding' ? style.padding : style.margin) ?? {}) };
+    if (raw.trim() === '') delete cur[side];
+    else cur[side] = Math.max(0, Math.min(200, Math.round(Number(raw) || 0)));
+    write(ring, Object.values(cur).some((v) => v !== undefined) ? cur : undefined);
+  };
+
+  const ringRow = (ring: Ring, label: string, hint: string) => {
+    const box = (ring === 'padding' ? style.padding : style.margin) ?? {};
+    const open = custom[ring] || sizes[ring] === 'custom';
+    return (
+      <div key={ring} className="mt-3 first:mt-1">
+        <div className="mb-1.5 flex items-center gap-2">
+          <span className="text-[12px] font-medium text-[#364658]" title={hint}>{label}</span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-[#9CA3AF]">{hint}</span>
           <button
-            key={s}
-            aria-pressed={value === s}
-            onClick={() => pick(s)}
-            title={s === 'auto' ? 'As the block rests — follows the page' : s === 'S' ? 'Small' : s === 'M' ? 'Medium' : 'Large'}
-            className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5]"
-          >{s === 'auto' ? 'Auto' : s}</button>
-        ))}
+            onClick={() => setCustom((c) => ({ ...c, [ring]: !open }))}
+            aria-pressed={open}
+            title={`Custom — set each side of the ${ring === 'padding' ? 'space inside' : 'space around'}`}
+            className={`flex size-6 flex-shrink-0 items-center justify-center rounded transition-colors ${
+              open ? 'bg-[#EBF5FF] text-[#3D8BD0]' : 'text-[#7B8FA5] hover:bg-[#F3F4F6] hover:text-[#364658]'
+            }`}
+          ><Settings2 size={14} /></button>
+        </div>
+        <div className="pill-track">
+          {(Object.keys(SIZES) as SizeKey[]).map((k) => (
+            <button
+              key={k}
+              aria-pressed={sizes[ring] === k}
+              onClick={() => pick(ring, k)}
+              title={`${SIZE_NAME[k]} — ${SIZES[k]}px${sizes[ring] === k ? ' · click again to clear' : ''}`}
+              className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5]"
+            >{k}</button>
+          ))}
+        </div>
+        {open && (
+          <div className="mt-2 grid grid-cols-4 gap-1.5">
+            {SIDES.map((s) => {
+              const own = box[s];
+              const rest = resting?.[ring]?.[s];
+              return (
+                <label key={s} className="flex flex-col items-center gap-1">
+                  <span className="flex h-8 w-full items-center rounded border border-[#DFE5ED] bg-white pr-1.5 focus-within:border-[#3D8BD0] focus-within:ring-1 focus-within:ring-[#3D8BD0]">
+                    <input
+                      type="number"
+                      min={0}
+                      max={200}
+                      value={own ?? ''}
+                      placeholder={rest !== undefined ? String(Math.round(rest)) : '0'}
+                      onChange={(e) => setSide(ring, s, e.target.value)}
+                      className="w-full min-w-0 bg-transparent pl-2 text-[12px] tabular-nums text-[#364658] outline-none [appearance:textfield] placeholder:text-[#B0BAC6] [&::-webkit-inner-spin-button]:appearance-none"
+                    />
+                    <span className="text-[10px] text-[#9CA3AF]">px</span>
+                  </span>
+                  <span className="text-[10.5px] capitalize text-[#7B8FA5]">{s}</span>
+                </label>
+              );
+            })}
+          </div>
+        )}
       </div>
-    </div>
-  );
+    );
+  };
+
   return (
     <div>
-      {only !== 'margin' && row('Space inside', 'Between the edge and the content', inside, (s) =>
-        onChange({ padding: s === 'auto' ? undefined : { top: INSIDE[s as 'S'], right: INSIDE[s as 'S'], bottom: INSIDE[s as 'S'], left: INSIDE[s as 'S'] } } as Partial<NodeStyle>))}
-      {only !== 'padding' && row('Space around', 'Above and below the block', around, (s) =>
-        onChange({ margin: s === 'auto' ? undefined : { top: AROUND[s as 'S'], bottom: AROUND[s as 'S'] } } as Partial<NodeStyle>))}
-      <button
-        onClick={() => setExact((x) => !x)}
-        className="mt-3 flex items-center gap-1 text-[11.5px] font-medium text-[#3D8BD0] hover:underline"
-      >
-        <ChevronRight size={12} className={`transition-transform ${exact ? 'rotate-90' : ''}`} />
-        {exact ? 'Hide exact values' : 'Exact values'}
-      </button>
-      {exact && <SpacingMatrix {...props} />}
+      {only !== 'margin' && ringRow('padding', 'Space inside', 'Edge to content')}
+      {only !== 'padding' && ringRow('margin', 'Space around', 'Above and below')}
     </div>
   );
 }
