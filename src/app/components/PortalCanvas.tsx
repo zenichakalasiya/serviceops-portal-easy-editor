@@ -1335,6 +1335,8 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
   }, [open]);
   const bgRef = useRef<HTMLButtonElement>(null);
   const edgeRef = useRef<HTMLButtonElement>(null);
+  /* The popup itself, so the colour picker can open BESIDE it rather than on top of it. */
+  const popRef = useRef<HTMLDivElement>(null);
   const viaCfg = fillsFromConfig(id);
   const box = ((viaCfg ? cfg?.(id) : styles[id]) ?? {}) as Record<string, unknown>;
   const st = (styles[id] ?? {}) as Record<string, unknown>;
@@ -1444,6 +1446,7 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
         <>
           <span className="fixed inset-0 z-[9998]" onClick={() => { setOpen(false); setAt(null); }} />
           <div
+            ref={popRef}
             data-portal-popover
             onClick={(e) => e.stopPropagation()}
             className="fixed z-[9999] w-[264px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]"
@@ -1541,6 +1544,7 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
               value={at.key === 'bg' ? bgShown : edgeShown}
               pair={at.key === 'bg' ? pairBg : pairEdge}
               anchor={at.rect}
+              beside={popRef.current?.getBoundingClientRect()}
               onChange={(v) => (at.key === 'bg' ? setBg(v) : setBorderColor(v))}
               onClose={() => setAt(null)}
             />

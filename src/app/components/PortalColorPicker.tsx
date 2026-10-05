@@ -150,9 +150,12 @@ type PickerProps = {
   modeTab?: { value: 'light' | 'dark'; onChange: (m: 'light' | 'dark') => void };
   /** Replaces Cancel's single-value restore — the pair wrapper restores both halves. */
   onCancel?: () => void;
+  /** A box the picker must open BESIDE rather than over — the popup the swatch lives in. Without
+   *  it the picker hangs under its swatch, which inside another popup means on top of that popup. */
+  beside?: DOMRect;
 };
 
-function PickerBody({ value, onChange, onClose, anchor, modeTab, onCancel }: PickerProps) {
+function PickerBody({ value, onChange, onClose, anchor, modeTab, onCancel, beside }: PickerProps) {
   /* ⚠️ No Saved list. A portal is built from its THEME palette, and a per-browser set of saved
      swatches is a second palette that nobody else on the team can see — it quietly competes with
      the one place colour is supposed to be defined. Recent stays because it is a shortcut back to
@@ -265,9 +268,35 @@ function PickerBody({ value, onChange, onClose, anchor, modeTab, onCancel }: Pic
      edits sit apart, so it covered the very block whose colour you were judging. Every part is
      still here; each is simply the size it needs rather than the size a full-page picker uses. */
   const W = 224;
-  const H = 360;
-  const top = Math.max(8, Math.min(anchor.bottom + 6, window.innerHeight - H - 8));
-  const left = Math.max(8, Math.min(anchor.right - W, window.innerWidth - W - 8));
+  /* The real height with the grip and the Light/Dark tabs (measured 386), so clamping keeps the foot on screen. */
+  const H = 392;
+  /* ── Where it opens, and the fact that it can be MOVED ───────────────────────────────────────
+     ⚠️ Beside its popup when it has one (right side, else left), level with the swatch — opened over
+     the popup it hid the very fields you were comparing it against.
+     ⚠️ And a grip on top: wherever it lands, it may still sit on the card whose colour you are
+     judging, so the admin can drag it out of the way. The position is STATE seeded once — the
+     picker must not jump back every time a colour change re-renders it. */
+  const clampTop = (t: number) => Math.max(8, Math.min(t, window.innerHeight - H - 8));
+  const clampLeft = (l: number) => Math.max(8, Math.min(l, window.innerWidth - W - 8));
+  const [pos, setPos] = useState(() => {
+    if (beside) {
+      const right = beside.right + 8;
+      const left = right + W <= window.innerWidth - 8 ? right : beside.left - 8 - W;
+      return { top: clampTop(anchor.top - 44), left: clampLeft(left) };
+    }
+    return { top: clampTop(anchor.bottom + 6), left: clampLeft(anchor.right - W) };
+  });
+  const { top, left } = pos;
+  const startMove = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const dx = e.clientX - pos.left;
+    const dy = e.clientY - pos.top;
+    const move = (ev: MouseEvent) => setPos({ left: clampLeft(ev.clientX - dx), top: clampTop(ev.clientY - dy) });
+    const up = () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); document.body.style.cursor = ''; };
+    document.body.style.cursor = 'grabbing';
+    window.addEventListener('mousemove', move);
+    window.addEventListener('mouseup', up);
+  };
 
   /* ── the popover ──────────────────────────────────────────────────────────
    *
@@ -287,6 +316,12 @@ function PickerBody({ value, onChange, onClose, anchor, modeTab, onCancel }: Pic
       style={{ top, left, width: W }}
       className="fixed z-[10000] rounded-lg border border-[#E5E7EB] bg-white p-2.5 shadow-[0_12px_24px_-6px_rgba(16,24,40,0.18)]"
     >
+      {/* The grip — a sheet-style handle, the one shape everybody already reads as "drag me". */}
+      <div
+        onMouseDown={startMove}
+        title="Drag to move"
+        className="-mx-2.5 -mt-2.5 mb-1.5 flex h-[18px] cursor-grab items-center justify-center rounded-t-lg transition-colors hover:bg-[#F5F7FA] active:cursor-grabbing"
+      ><span className="h-1 w-9 rounded-full bg-[#CBD5E1]" /></div>
       {/* ⚠️ ABOVE the spectrum, because it says which of two values everything below it is editing.
           Underneath, you would have picked a colour before being told where it was going. */}
       {modeTab && (
