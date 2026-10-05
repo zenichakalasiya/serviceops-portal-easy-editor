@@ -41,11 +41,26 @@ interface Props {
 }
 
 /** An element that paints its own card keeps its padding on the card, one level in. */
+/* ⚠️ A DATA CARD keeps its inset deeper still — on its header and rows (`px-4`), with the card itself
+   and its first child both at 0. So the search goes breadth-first a few levels down for the first box
+   that carries horizontal padding AND sits flush with the card's edge (within 2px — the card's own
+   1px border). Flush is the test that it is the card's inset, not some inner chip's padding. */
 function padBoxOf(el: HTMLElement): HTMLElement {
-  const cs = getComputedStyle(el);
-  const flat = (['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'] as const)
-    .every((k) => parseFloat(cs[k]) === 0);
-  return flat ? ((el.firstElementChild as HTMLElement | null) ?? el) : el;
+  const padded = (e: HTMLElement) => {
+    const c = getComputedStyle(e);
+    return (['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'] as const).some((k) => parseFloat(c[k]) > 0);
+  };
+  if (padded(el)) return el;
+  const r = el.getBoundingClientRect();
+  let level: HTMLElement[] = [...el.children] as HTMLElement[];
+  for (let depth = 0; depth < 4 && level.length; depth += 1) {
+    for (const k of level) {
+      const kr = k.getBoundingClientRect();
+      if (padded(k) && Math.abs(kr.left - r.left) <= 2 && Math.abs(kr.right - r.right) <= 2) return k;
+    }
+    level = level.flatMap((k) => [...k.children] as HTMLElement[]);
+  }
+  return (el.firstElementChild as HTMLElement | null) ?? el;
 }
 
 /** Measures an element's resting padding and margin off the canvas — every side in px, the unit the
@@ -366,9 +381,16 @@ export function SpacingMatrix({ style, onChange, only, resting, nodeId }: Props)
  * What an admin who is not a designer actually decides: a little room or a lot, inside the block and
  * around it. Nobody should have to know that the first is padding and the second margin.
  *
- * S · M · L · XL = 4 · 6 · 8 · 12 px (Zeni, 5 Oct 2026). There is no Auto button: pressing the lit size
- * AGAIN clears it, deleting the key so the block goes back to its resting spacing and keeps following
- * the page — the same "off" a toggle has, without a fifth button that means "none of these".
+ * S · M · L · XL = 4 · 8 · 12 · 16 px (Zeni, 5 Oct 2026 — re-scaled from 4/6/8/12 so a block's own
+ * default lands on a real tab: action and data cards rest at a 16px inset, tiles at 12).
+ *
+ * ⚠️ AN UNTOUCHED BLOCK LIGHTS ITS DEFAULT. With nothing set, the tab matching what the block already
+ * has is selected, read from the MEASURED resting spacing — so the admin starts from the truth and
+ * changes it, rather than seeing four unlit tabs over a card that plainly has room in it. Inside is
+ * matched on the HORIZONTAL inset (left = right): that is the edge-to-content distance a reader sees,
+ * and card headers carry slightly different top/bottom (14/10) for optical balance. A block whose
+ * default fits no size (a section's 24px) lights none. Clicking the default tab does nothing — it is
+ * already the value; clicking a tab you SET clears it back to the default.
  *
  * ⚠️ Inside moves all four sides. Around moves only TOP and BOTTOM — a left/right margin on a card in
  * a row takes width from the row, so the last card wraps. The sides are reachable through Custom.
@@ -376,7 +398,7 @@ export function SpacingMatrix({ style, onChange, only, resting, nodeId }: Props)
  * ⚠️ CUSTOM is an icon on each ring's own heading, opening that ring's four sides — Top · Right ·
  * Bottom · Left, in CSS order. It opens by itself when the ring already carries values no size
  * describes, so nothing set is ever hidden. The old two-field "Exact values" matrix is gone from here. */
-const SIZES = { S: 4, M: 6, L: 8, XL: 12 } as const;
+const SIZES = { S: 4, M: 8, L: 12, XL: 16 } as const;
 type SizeKey = keyof typeof SIZES;
 type Size = SizeKey | 'auto' | 'custom';
 const SIZE_NAME: Record<SizeKey, string> = { S: 'Small', M: 'Medium', L: 'Large', XL: 'Extra large' };
@@ -392,9 +414,27 @@ function sizeOfRing(b: SpacingBox | undefined, ring: Ring): Size {
   return 'custom';
 }
 
+/** The size a block's RESTING spacing already matches, or null. */
+function restingSize(b: SpacingBox | undefined, ring: Ring): SizeKey | null {
+  if (!b) return null;
+  for (const k of Object.keys(SIZES) as SizeKey[]) {
+    const v = SIZES[k];
+    if (ring === 'padding' && b.left === v && b.right === v) return k;
+    if (ring === 'margin' && b.top === v && b.bottom === v) return k;
+  }
+  return null;
+}
+
 export function SimpleSpacing(props: Props) {
   const { style, onChange, only, resting } = props;
-  const sizes = { padding: sizeOfRing(style.padding, 'padding'), margin: sizeOfRing(style.margin, 'margin') };
+  const own = { padding: sizeOfRing(style.padding, 'padding'), margin: sizeOfRing(style.margin, 'margin') };
+  /* What is lit: the size somebody set, else the size the block already rests at. `fromRest` marks
+     the second, so clicking it is a no-op rather than a "clear". */
+  const lit = (ring: Ring): { key: Size | null; fromRest: boolean } =>
+    own[ring] === 'auto'
+      ? { key: restingSize(resting?.[ring], ring), fromRest: true }
+      : { key: own[ring], fromRest: false };
+  const sizes = own;
   const [custom, setCustom] = useState<Record<Ring, boolean>>({
     padding: sizes.padding === 'custom',
     margin: sizes.margin === 'custom',
@@ -402,7 +442,8 @@ export function SimpleSpacing(props: Props) {
   const write = (ring: Ring, box: SpacingBox | undefined) =>
     onChange((ring === 'padding' ? { padding: box } : { margin: box }) as Partial<NodeStyle>);
   const pick = (ring: Ring, k: SizeKey) => {
-    if (sizes[ring] === k) { write(ring, undefined); return; }
+    const l = lit(ring);
+    if (l.key === k) { if (!l.fromRest) write(ring, undefined); return; }
     const v = SIZES[k];
     write(ring, ring === 'padding' ? { top: v, right: v, bottom: v, left: v } : { top: v, bottom: v });
   };
@@ -434,22 +475,27 @@ export function SimpleSpacing(props: Props) {
           {/* ⚠️ INSTANT tooltips (delay 0), not `title` — a letter says nothing about pixels, and the
               number is the answer to the only question you hover these to ask. `asChild` keeps the
               button the track's direct child, which is what `.pill-track > button` styles. */}
-          {(Object.keys(SIZES) as SizeKey[]).map((k) => (
-            <Tooltip key={k} delayDuration={0}>
-              <TooltipTrigger asChild>
-                <button
-                  aria-pressed={sizes[ring] === k}
-                  aria-label={`${SIZE_NAME[k]}, ${SIZES[k]}px`}
-                  onClick={() => pick(ring, k)}
-                  className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5]"
-                >{k}</button>
-              </TooltipTrigger>
-              <TooltipContent side="top">
-                {SIZE_NAME[k]} · <span className="font-semibold">{SIZES[k]}px</span>
-                {sizes[ring] === k && <span className="text-white/70"> · click again to clear</span>}
-              </TooltipContent>
-            </Tooltip>
-          ))}
+          {(Object.keys(SIZES) as SizeKey[]).map((k) => {
+            const l = lit(ring);
+            const on = l.key === k;
+            return (
+              <Tooltip key={k} delayDuration={0}>
+                <TooltipTrigger asChild>
+                  <button
+                    aria-pressed={on}
+                    aria-label={`${SIZE_NAME[k]}, ${SIZES[k]}px`}
+                    onClick={() => pick(ring, k)}
+                    className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5]"
+                  >{k}</button>
+                </TooltipTrigger>
+                <TooltipContent side="top">
+                  {SIZE_NAME[k]} · <span className="font-semibold">{SIZES[k]}px</span>
+                  {on && l.fromRest && <span className="text-white/70"> · default</span>}
+                  {on && !l.fromRest && <span className="text-white/70"> · click to reset</span>}
+                </TooltipContent>
+              </Tooltip>
+            );
+          })}
         </div>
         {open && (
           <div className="mt-2 grid grid-cols-4 gap-1.5">
