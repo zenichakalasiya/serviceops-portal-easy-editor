@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link2, Link2Off, MoveHorizontal, MoveVertical, Settings2 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { Tooltip, TooltipContent, TooltipTrigger } from './ui/tooltip';
 import type { NodeStyle, SpacingBox } from './portalPageModel';
 
 /* Padding and margin.
@@ -430,14 +431,24 @@ export function SimpleSpacing(props: Props) {
           ><Settings2 size={14} /></button>
         </div>
         <div className="pill-track">
+          {/* ⚠️ INSTANT tooltips (delay 0), not `title` — a letter says nothing about pixels, and the
+              number is the answer to the only question you hover these to ask. `asChild` keeps the
+              button the track's direct child, which is what `.pill-track > button` styles. */}
           {(Object.keys(SIZES) as SizeKey[]).map((k) => (
-            <button
-              key={k}
-              aria-pressed={sizes[ring] === k}
-              onClick={() => pick(ring, k)}
-              title={`${SIZE_NAME[k]} — ${SIZES[k]}px${sizes[ring] === k ? ' · click again to clear' : ''}`}
-              className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5]"
-            >{k}</button>
+            <Tooltip key={k} delayDuration={0}>
+              <TooltipTrigger asChild>
+                <button
+                  aria-pressed={sizes[ring] === k}
+                  aria-label={`${SIZE_NAME[k]}, ${SIZES[k]}px`}
+                  onClick={() => pick(ring, k)}
+                  className="flex-1 rounded py-1 text-[12px] font-medium text-[#7B8FA5]"
+                >{k}</button>
+              </TooltipTrigger>
+              <TooltipContent side="top">
+                {SIZE_NAME[k]} · <span className="font-semibold">{SIZES[k]}px</span>
+                {sizes[ring] === k && <span className="text-white/70"> · click again to clear</span>}
+              </TooltipContent>
+            </Tooltip>
           ))}
         </div>
         {open && (
