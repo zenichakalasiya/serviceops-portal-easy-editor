@@ -1296,11 +1296,14 @@ function CornerGlyph({ r, dashed }: { r: number; dashed?: boolean }) {
 /** One small picture tile — the card-style row is built from these. */
 function StyleTile({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: ReactNode }) {
   return (
-    <button onClick={onClick} aria-pressed={on} className="group flex min-w-0 flex-1 flex-col items-center gap-1">
-      <span className={`flex h-[34px] w-full items-center justify-center rounded-md border-[1.5px] bg-[#F4F6FA] transition-colors ${
+    /* ⚠️ Roomy on purpose (Zeni, 5 Oct 2026): the mini card sits INSIDE its box with 10px of air on
+       every side. At 34px tall the card touched the box's edges and the four read as one cluttered
+       strip; a box with margin round its sample reads as a set of separate choices. */
+    <button onClick={onClick} aria-pressed={on} className="group flex min-w-0 flex-1 flex-col items-center gap-1.5">
+      <span className={`flex h-[58px] w-full items-center justify-center rounded-lg border-[1.5px] bg-[#F4F6FA] p-2.5 transition-colors ${
         on ? 'border-[#3D8BD0] bg-[#F5F9FE]' : 'border-transparent group-hover:border-[#CBD5E1]'
       }`}>{children}</span>
-      <span className={`max-w-full truncate text-[10.5px] leading-none ${on ? 'font-semibold text-[#3D8BD0]' : 'text-[#64748B]'}`}>{label}</span>
+      <span className={`max-w-full truncate text-[11px] leading-none ${on ? 'font-semibold text-[#3D8BD0]' : 'text-[#64748B]'}`}>{label}</span>
     </button>
   );
 }
@@ -1321,7 +1324,7 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
     if (!r) return;
     const below = window.innerHeight - r.bottom - 12;
     const above = r.top - 12;
-    const left = Math.max(8, Math.min(r.left, window.innerWidth - 272));
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 308));
     setPlace(below >= 380 || below >= above
       ? { left, top: r.bottom + 6, maxH: below }
       : { left, bottom: window.innerHeight - r.top + 6, maxH: above });
@@ -1449,7 +1452,7 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
             ref={popRef}
             data-portal-popover
             onClick={(e) => e.stopPropagation()}
-            className="fixed z-[9999] w-[264px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]"
+            className="fixed z-[9999] w-[300px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]"
             style={{ left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxH }}
           >
             <div className="mb-2 flex items-center justify-between gap-2">
@@ -1473,18 +1476,18 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
                   · Shadow     — WORDS, in a strip.
                 No two rows share a shape, so a glance says which question a row is asking. */}
             {boxOk ? (
-              <div className="flex gap-1.5">
+              <div className="flex gap-2">
                 {LOOKS.map((l) => (
                   <StyleTile key={l.id} on={preset === l.id && !customOpen} label={l.label} onClick={() => applyLook(l)}>
-                    <span className="flex h-[24px] w-[34px] flex-col justify-center gap-[3px] rounded-[4px] px-[5px]" style={l.tile}>
-                      <span className="h-[3px] w-[60%] rounded-full bg-[#64748B]/70" />
-                      <span className="h-[2px] w-full rounded-full bg-[#94A3B8]/45" />
-                      <span className="h-[2px] w-[70%] rounded-full bg-[#94A3B8]/45" />
+                    <span className="flex h-[34px] w-[48px] flex-col justify-center gap-[4px] rounded-[5px] px-[7px]" style={l.tile}>
+                      <span className="h-[4px] w-[60%] rounded-full bg-[#64748B]/70" />
+                      <span className="h-[3px] w-full rounded-full bg-[#94A3B8]/45" />
+                      <span className="h-[3px] w-[70%] rounded-full bg-[#94A3B8]/45" />
                     </span>
                   </StyleTile>
                 ))}
                 <StyleTile on={showCustom} label="Custom" onClick={() => setCustomOpen((x) => !x)}>
-                  <Settings2 size={15} className={showCustom ? 'text-[#3D8BD0]' : 'text-[#64748B]'} />
+                  <Settings2 size={18} className={showCustom ? 'text-[#3D8BD0]' : 'text-[#64748B]'} />
                 </StyleTile>
               </div>
             ) : null}
