@@ -9,7 +9,7 @@ import {
   AlignLeft, AlignRight, AlignStartHorizontal, AlignStartVertical, StretchHorizontal, StretchVertical,
   ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, Baseline, Bold, Check, ChevronDown, ChevronRight, Columns2, Copy, GripHorizontal, GripVertical, Italic, Link2, Rows2,
   Braces, Highlighter, Maximize2, UnfoldVertical, Move, MoveHorizontal, MoveVertical, Plus, RemoveFormatting,
-  PaintBucket, Paintbrush, Replace, SquareDashed, SquareRoundCorner, SquareSquare, Trash2, Underline, X, ImagePlus, Palette, LayoutDashboard, Columns3,
+  PaintBucket, Paintbrush, Replace, Settings2, SquareDashed, SquareRoundCorner, SquareSquare, Trash2, Underline, X, ImagePlus, Palette, LayoutDashboard, Columns3,
 } from 'lucide-react';
 import { BannerFillEditor, BannerLayoutPanel, OverlayLayerEditor, TilePresetPicker } from './PortalBannerTools';
 import { bannerBoxId, flipRoot, groupOf } from './portalBannerLayout';
@@ -1233,57 +1233,87 @@ function ShadowMenu({ id }: { id: string }) {
 
 /* ── STYLE — one labelled button for the whole look of a block ───────────────────────────────────
  *
- * ⚠️ It REPLACES four icon buttons — background, border, corner radius and shadow. Four small squares
- * on a bar are four things to hover before you know which is which, and a good-looking card needed
- * all four set in agreement. A non-designer does not want a border weight; they want the card to
- * look like a card, or like an outline, or like it lifts off the page.
+ * ⚠️ It REPLACES four icon buttons — background, border, corner radius and shadow — with ONE row of
+ * four card styles (Zeni's pick, 5 Oct 2026): **Regular · Outline · Shadow · Custom**. The first three
+ * are one click each and set fill, edge and shadow together; **Custom** is not a look of its own, it
+ * opens every field underneath, in the same popup, so the expert route costs one click and the common
+ * route costs one click too.
  *
- * So the popup opens on LOOKS: six tiles, each the effect itself, each ONE click that sets fill,
- * border and shadow together. The detailed controls are still there, folded under "Customise", for
- * the admin who wants a 3px dashed teal edge — nothing an expert could do before has gone.
- *
+ * ⚠️ Corners and shadow inside Custom are PICTURE TILES, not sliders: an admin judges a corner and a
+ * shadow by eye, and four tiles that ARE the effect are read faster than a number.
+ * ⚠️ Kept small on purpose — 50px tiles, 10.5px labels, one row each — so the popup never grows taller
+ * than the card it styles.
  * ⚠️ With nothing set, the block FOLLOWS THE PAGE STYLE (Theme → Page style), and the popup says so.
- * "Use page style" is the way back: it DELETES the keys rather than writing today's page values, so
- * the block goes on following the page when the page style changes.
- * ⚠️ Corners are NOT part of a look. They are the page's decision (Page style → Corners); a look
- * that also rounded the card would make one card disagree with the row it sits in.
- * ⚠️ Two stores, the same routing every control here uses (`fillsFromConfig`). The shadow always
- * lives in STYLES, whichever store holds the fill. */
-type LookDef = {
-  id: string; label: string;
-  bg: string; border: string | null; shadow: string | null;
-  /** How the tile draws it — the tile IS the effect. */
-  tile: React.CSSProperties;
-};
+ * "Use page style" DELETES the keys rather than copying today's page values, so the block goes on
+ * following the page when the page style changes. Corners "Standard" is the same idea for one key.
+ * ⚠️ Two stores, the routing every control here uses (`fillsFromConfig`). The shadow always lives in
+ * STYLES, whichever store holds the fill. */
+type LookDef = { id: string; label: string; bg: string; border: string | null; shadow: string | null; tile: React.CSSProperties };
 const LOOKS: LookDef[] = [
-  { id: 'card', label: 'Card', bg: '#FFFFFF', border: '#E5E7EB', shadow: null,
-    tile: { background: '#FFFFFF', border: '1px solid #E5E7EB' } },
-  { id: 'plain', label: 'Plain', bg: 'rgba(255,255,255,0)', border: null, shadow: null,
-    tile: { background: 'transparent', border: '1px dashed #CBD5E1' } },
+  { id: 'regular', label: 'Regular', bg: '#FFFFFF', border: '#E5E7EB', shadow: null,
+    tile: { background: '#FFFFFF', border: '1px solid #DDE3EA' } },
   { id: 'outline', label: 'Outline', bg: 'rgba(255,255,255,0)', border: '#94A3B8', shadow: null,
-    tile: { background: 'transparent', border: '1px solid #94A3B8' } },
-  { id: 'soft', label: 'Soft fill', bg: '#EEF2F6', border: null, shadow: null,
-    tile: { background: '#E6EBF1', border: '1px solid transparent' } },
-  { id: 'tinted', label: 'Tinted', bg: 'var(--portal-tone-wash, #EBF5FF)', border: 'var(--portal-tone-line, #CFE3F5)', shadow: null,
-    tile: { background: 'var(--portal-tone-wash, #EBF5FF)', border: '1px solid var(--portal-tone-line, #CFE3F5)' } },
-  { id: 'raised', label: 'Raised', bg: '#FFFFFF', border: null, shadow: 'rgba(16,24,40,0.12)',
-    tile: { background: '#FFFFFF', border: '1px solid transparent', boxShadow: '0 4px 10px -2px rgba(16,24,40,0.22)' } },
+    tile: { background: 'transparent', border: '1.5px solid #94A3B8' } },
+  { id: 'shadow', label: 'Shadow', bg: '#FFFFFF', border: null, shadow: 'rgba(16,24,40,0.12)',
+    tile: { background: '#FFFFFF', border: '1px solid transparent', boxShadow: '0 3px 8px -1px rgba(16,24,40,0.22)' } },
 ];
-const LOOK_SHADOWS: { key: string; label: string; color: string | null }[] = [
-  { key: 'none', label: 'None', color: null },
-  { key: 'soft', label: 'Soft', color: 'rgba(16,24,40,0.06)' },
-  { key: 'medium', label: 'Medium', color: 'rgba(16,24,40,0.12)' },
-  { key: 'strong', label: 'Strong', color: 'rgba(16,24,40,0.20)' },
+const LOOK_SHADOWS: { key: string; label: string; color: string | null; tile: string }[] = [
+  { key: 'none', label: 'None', color: null, tile: 'none' },
+  { key: 'soft', label: 'Soft', color: 'rgba(16,24,40,0.06)', tile: '0 1px 3px rgba(16,24,40,0.12)' },
+  { key: 'medium', label: 'Medium', color: 'rgba(16,24,40,0.12)', tile: '0 2px 6px rgba(16,24,40,0.20)' },
+  { key: 'strong', label: 'Strong', color: 'rgba(16,24,40,0.20)', tile: '0 4px 10px rgba(16,24,40,0.30)' },
+];
+/* `r: null` = Standard — the key is DELETED so the block follows the page's corners. */
+const LOOK_CORNERS: { key: string; label: string; r: number | null; tile: number }[] = [
+  { key: 'standard', label: 'Standard', r: null, tile: 6 },
+  { key: 'sharp', label: 'Sharp', r: 2, tile: 1 },
+  { key: 'rounded', label: 'Rounded', r: 12, tile: 6 },
+  { key: 'round', label: 'Round', r: 20, tile: 10 },
 ];
 /* The keys "Use page style" deletes, per store. */
 const STYLE_BOX_KEYS = ['bgFill', 'bg', 'dark:bg', 'borderMode', 'borderWidth', 'borderColor', 'dark:borderColor', 'borderStyle', 'radius', 'elevation', 'shadowOn', 'shadowColor', 'shadowType', 'shadowPos'];
 const CFG_BOX_KEYS = ['fill', 'bg', 'dark:bg', 'borderWidth', 'borderColor', 'dark:borderColor', 'radius'];
 
+/** One small picture tile — the shape the whole popup is built from. */
+function StyleTile({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: ReactNode }) {
+  return (
+    <button onClick={onClick} aria-pressed={on} className="group flex min-w-0 flex-1 flex-col items-center gap-1">
+      <span className={`flex h-[34px] w-full items-center justify-center rounded-md border-[1.5px] bg-[#F4F6FA] transition-colors ${
+        on ? 'border-[#3D8BD0] bg-[#F5F9FE]' : 'border-transparent group-hover:border-[#CBD5E1]'
+      }`}>{children}</span>
+      <span className={`max-w-full truncate text-[10.5px] leading-none ${on ? 'font-semibold text-[#3D8BD0]' : 'text-[#64748B]'}`}>{label}</span>
+    </button>
+  );
+}
+
 function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
   const { styles, setStyle, cfg, setCfg } = useCanvas();
   const [open, setOpen] = useState(false);
-  const [custom, setCustom] = useState(false);
+  const [customOpen, setCustomOpen] = useState(false);
   const [at, setAt] = useState<{ rect: DOMRect; key: 'bg' | 'borderColor' } | null>(null);
+  /* ⚠️ The popup is placed against the WINDOW, not the toolbar. Hung under the button it ran off the
+     bottom of the screen whenever the card sat low on the page — and with Custom open it is the
+     tallest popup on the bar. It opens below when there is room, ABOVE when there is more room
+     there, and caps its height to the side it chose so it never leaves the screen. */
+  const trigRef = useRef<HTMLButtonElement>(null);
+  const [place, setPlace] = useState<{ left: number; top?: number; bottom?: number; maxH: number } | null>(null);
+  const measure = () => {
+    const r = trigRef.current?.getBoundingClientRect();
+    if (!r) return;
+    const below = window.innerHeight - r.bottom - 12;
+    const above = r.top - 12;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - 272));
+    setPlace(below >= 380 || below >= above
+      ? { left, top: r.bottom + 6, maxH: below }
+      : { left, bottom: window.innerHeight - r.top + 6, maxH: above });
+  };
+  useEffect(() => {
+    if (!open) return;
+    measure();
+    window.addEventListener('resize', measure);
+    window.addEventListener('scroll', measure, true);
+    return () => { window.removeEventListener('resize', measure); window.removeEventListener('scroll', measure, true); };
+  }, [open]);
   const bgRef = useRef<HTMLButtonElement>(null);
   const edgeRef = useRef<HTMLButtonElement>(null);
   const viaCfg = fillsFromConfig(id);
@@ -1300,33 +1330,36 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
     ? (bw > 0 && box.borderColor !== 'transparent' ? String(box.borderColor ?? '#E5E7EB') : null)
     : (box.borderMode === 'none' ? null : bw > 0 ? String(box.borderColor ?? '#E5E7EB') : null);
   const shadowNow = st.shadowOn === true ? String(st.shadowColor ?? '') : null;
+  const radiusSet = box.radius !== undefined;
   const ownKeys = (viaCfg ? CFG_BOX_KEYS.some((k) => box[k] !== undefined && !(k === 'fill' && box[k] === 'none')) : false)
     || STYLE_BOX_KEYS.some((k) => st[k] !== undefined);
-  const current = ownKeys
-    ? LOOKS.find((l) => l.bg === bgNow && l.border === borderNow && (l.shadow ?? null) === shadowNow)?.id ?? 'custom'
-    : 'page';
+  /* A preset is lit only when the block matches it EXACTLY — any hand-set corner or a colour the
+     presets do not use is "Custom", which is what the Custom tile then says. */
+  const preset = !ownKeys ? null
+    : LOOKS.find((l) => l.bg === bgNow && l.border === borderNow && (l.shadow ?? null) === shadowNow && !radiusSet)?.id ?? null;
+  const isCustom = ownKeys && !preset;
+  const showCustom = boxOk && (customOpen || isCustom);
 
   const applyLook = (l: LookDef) => {
-    if (boxOk) {
-      if (viaCfg) {
-        /* ⚠️ A config-filled box only draws a border while its width is above 0, and a width of 0
-           leaves the card's RESTING hairline in place — so "no border" is a 1px transparent one. */
-        putBox({ fill: 'color', bg: l.bg, borderWidth: 1, borderColor: l.border ?? 'transparent' });
-      } else {
-        putBox(l.border
-          ? { bgFill: 'color', bg: l.bg, borderMode: 'line', borderWidth: 1, borderStyle: 'solid', borderColor: l.border }
-          : { bgFill: 'color', bg: l.bg, borderMode: 'none' });
-      }
+    if (viaCfg) {
+      /* ⚠️ A config-filled box draws a border only while its width is above 0, and width 0 leaves the
+         card's RESTING hairline in place — so "no border" is a 1px transparent one. */
+      putBox({ fill: 'color', bg: l.bg, borderWidth: 1, borderColor: l.border ?? 'transparent', radius: undefined });
+    } else {
+      putBox(l.border
+        ? { bgFill: 'color', bg: l.bg, borderMode: 'line', borderWidth: 1, borderStyle: 'solid', borderColor: l.border, radius: undefined }
+        : { bgFill: 'color', bg: l.bg, borderMode: 'none', radius: undefined });
     }
-    /* `elevation: 'flat'` is what takes a card's RESTING shadow off — without it, "Plain" would still
-       float on the shadow its class draws. */
+    /* `elevation: 'flat'` takes a card's RESTING shadow off — the one its class draws. */
     putStyle(l.shadow
       ? { shadowOn: true, shadowColor: l.shadow, shadowType: 'outer', shadowPos: 'bottom', elevation: undefined }
       : { shadowOn: false, elevation: 'flat' });
+    setCustomOpen(false);
   };
   const usePage = () => {
     if (viaCfg) setCfg?.(id, Object.fromEntries(CFG_BOX_KEYS.map((k) => [k, undefined])));
     putStyle(Object.fromEntries(STYLE_BOX_KEYS.map((k) => [k, undefined])));
+    setCustomOpen(false);
   };
 
   const setBg = (v: string) => putBox(viaCfg ? { fill: 'color', bg: v } : { bgFill: 'color', bg: v });
@@ -1334,115 +1367,126 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
     ? { borderWidth: v, ...(box.borderColor === 'transparent' ? { borderColor: '#E5E7EB' } : {}) }
     : { borderWidth: v, borderMode: v > 0 ? 'line' : 'none', borderStyle: String(box.borderStyle ?? 'solid') });
   const setBorderColor = (v: string) => putBox(viaCfg ? { borderColor: v } : { borderColor: v, borderMode: 'line' });
-  const radius = Number(box.radius ?? 8);
-  const shadowKey = st.shadowOn !== true ? 'none' : LOOK_SHADOWS.find((s) => s.color === String(st.shadowColor ?? ''))?.key ?? 'custom';
+  const cornerKey = !radiusSet ? 'standard' : LOOK_CORNERS.find((c) => c.r === Number(box.radius))?.key ?? null;
+  const shadowKey = st.shadowOn !== true ? 'none' : LOOK_SHADOWS.find((s) => s.color === String(st.shadowColor ?? ''))?.key ?? null;
+  const setShadow = (s: (typeof LOOK_SHADOWS)[number]) => putStyle(s.color
+    ? { shadowOn: true, shadowColor: s.color, shadowType: 'outer', shadowPos: 'bottom', elevation: undefined }
+    : { shadowOn: false, elevation: 'flat' });
 
   const bgShown = bgNow && !bgNow.startsWith('var(') ? bgNow : '#FFFFFF';
   const edgeShown = borderNow && !borderNow.startsWith('var(') ? borderNow : '#E5E7EB';
   const pairBg = colorPair(filled ? box : {}, 'bg', '#FFFFFF', putBox, viaCfg ? { fill: 'color' } : { bgFill: 'color' });
   const pairEdge = colorPair(box, 'borderColor', '#E5E7EB', putBox, viaCfg ? {} : { borderMode: 'line' });
 
-  const label = (t: string) => <p className="mb-1 mt-3 text-[11px] font-medium text-[#7B8FA5] first:mt-0">{t}</p>;
-  const swatchBtn = (ref: React.RefObject<HTMLButtonElement | null>, value: string, key: 'bg' | 'borderColor', text: string) => (
+  /* A compact colour field — swatch + value, the height of one line. */
+  const swatch = (ref: React.RefObject<HTMLButtonElement | null>, value: string, key: 'bg' | 'borderColor', text: string) => (
     <button
       ref={ref}
       onClick={() => setAt(at?.key === key ? null : { rect: ref.current!.getBoundingClientRect(), key })}
-      className="flex h-8 w-full items-center gap-2 rounded border border-[#DFE5ED] px-2 text-left text-[12px] text-[#364658] transition-colors hover:bg-[#F5F7FA]"
+      className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded border border-[#DFE5ED] px-1.5 text-left text-[11.5px] text-[#364658] transition-colors hover:bg-[#F5F7FA]"
     >
-      <span className="size-4 flex-shrink-0 rounded-[3px] border border-[#CBD5E1]" style={{ background: value }} />
+      <span className="size-3.5 flex-shrink-0 rounded-[3px] border border-[#CBD5E1]" style={{ background: value }} />
       <span className="truncate">{text}</span>
     </button>
   );
+  const head = (t: string) => <p className="mb-1.5 text-[11px] font-medium text-[#7B8FA5]">{t}</p>;
 
   return (
     <div className="relative">
       <button
+        ref={trigRef}
         className={`${textBtn} ${open ? 'bg-[var(--bar-on-bg,#EBF5FF)] text-[var(--bar-on-ink,#3D8BD0)]' : ''}`}
         data-tip="Style — how this block looks"
         onClick={() => { setAt(null); setOpen((x) => !x); }}
       ><Paintbrush size={14} />Style<ChevronDown size={12} className="text-[#9CA3AF]" /></button>
-      {open && (
+      {open && place && createPortal(
         <>
-          <span className="fixed inset-0 z-[60]" onClick={() => { setOpen(false); setAt(null); }} />
-          <div className="absolute left-0 top-[calc(100%+6px)] z-[61] w-[280px] rounded-lg border border-[#E5E7EB] bg-white shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]">
-            <div className="flex items-center justify-between gap-2 px-3 pb-2 pt-3">
-              <p className="text-[12.5px] font-semibold text-[#1E293B]">Style</p>
-              {current === 'page' ? (
-                <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-2 py-0.5 text-[10.5px] font-medium text-[#067647]">
-                  <Check size={10} /> Follows page style
+          <span className="fixed inset-0 z-[9998]" onClick={() => { setOpen(false); setAt(null); }} />
+          <div
+            data-portal-popover
+            onClick={(e) => e.stopPropagation()}
+            className="fixed z-[9999] w-[264px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]"
+            style={{ left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxH }}
+          >
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-[12.5px] font-semibold text-[#1E293B]">Card style</p>
+              {!ownKeys ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-1.5 py-0.5 text-[10px] font-medium text-[#067647]">
+                  <Check size={10} /> Page style
                 </span>
               ) : (
-                <button onClick={usePage} className="rounded px-1.5 py-0.5 text-[11.5px] font-medium text-[#3D8BD0] transition-colors hover:bg-[#EBF5FF]">
+                <button onClick={usePage} className="rounded px-1 py-0.5 text-[11px] font-medium text-[#3D8BD0] transition-colors hover:bg-[#EBF5FF]">
                   Use page style
                 </button>
               )}
             </div>
-            {boxOk && (
-              <div className="grid grid-cols-3 gap-2 px-3">
+
+            {boxOk ? (
+              /* ── ONE row: three ready styles and Custom ── */
+              <div className="flex gap-1.5">
                 {LOOKS.map((l) => (
-                  <button key={l.id} onClick={() => applyLook(l)} className="group flex min-w-0 flex-col items-center gap-1">
-                    <span className={`flex h-[48px] w-full items-center justify-center rounded-md border-2 bg-[#F4F6FA] transition-colors ${
-                      current === l.id ? 'border-[#3D8BD0]' : 'border-transparent group-hover:border-[#CBD5E1]'
-                    }`}>
-                      <span className="flex h-[28px] w-[44px] flex-col justify-center gap-[3px] rounded-[5px] px-1.5" style={l.tile}>
-                        <span className="h-[3px] w-4/5 rounded-full bg-[#94A3B8]/60" />
-                        <span className="h-[3px] w-1/2 rounded-full bg-[#94A3B8]/35" />
-                      </span>
-                    </span>
-                    <span className={`truncate text-[11px] ${current === l.id ? 'font-semibold text-[#3D8BD0]' : 'text-[#64748B]'}`}>{l.label}</span>
-                  </button>
+                  <StyleTile key={l.id} on={preset === l.id && !customOpen} label={l.label} onClick={() => applyLook(l)}>
+                    <span className="h-[18px] w-[26px] rounded-[4px]" style={l.tile} />
+                  </StyleTile>
                 ))}
+                <StyleTile on={showCustom} label="Custom" onClick={() => setCustomOpen((x) => !x)}>
+                  <Settings2 size={14} className="text-[#64748B]" />
+                </StyleTile>
               </div>
-            )}
-            {/* Shadow alone, for blocks whose box this bar cannot paint (a button, an icon badge). */}
-            {!boxOk && (
-              <div className="px-3">
-                {label('Shadow')}
-                <div className="pill-track">
+            ) : (
+              /* A button or an icon badge paints its box elsewhere — the shadow is all this bar reaches. */
+              <>
+                {head('Shadow')}
+                <div className="flex gap-1.5">
                   {LOOK_SHADOWS.map((s) => (
-                    <button key={s.key} aria-pressed={shadowKey === s.key}
-                      onClick={() => putStyle(s.color ? { shadowOn: true, shadowColor: s.color, shadowType: 'outer', shadowPos: 'bottom' } : { shadowOn: false })}
-                      className="flex-1 rounded py-1 text-[11.5px] font-medium text-[#7B8FA5]">{s.label}</button>
+                    <StyleTile key={s.key} on={shadowKey === s.key} label={s.label} onClick={() => setShadow(s)}>
+                      <span className="h-[16px] w-[24px] rounded-[3px] bg-white" style={{ boxShadow: s.tile }} />
+                    </StyleTile>
+                  ))}
+                </div>
+              </>
+            )}
+
+            {showCustom && (
+              <div className="mt-3 border-t border-[#F0F2F5] pt-3">
+                {/* Fill and edge share a row: two compact colour fields, the edge weight beside its colour. */}
+                <div className="flex gap-2">
+                  <div className="min-w-0 flex-1">
+                    {head('Background')}
+                    <div className="flex">{swatch(bgRef, bgNow ?? 'transparent', 'bg', !bgNow ? 'Page style' : bgNow.startsWith('var(') ? 'Theme tint' : /^rgba\(.*,0\)$/.test(bgNow.replace(/\s/g, '')) ? 'Transparent' : bgNow)}</div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    {head('Border')}
+                    <div className="flex items-center gap-1">
+                      {swatch(edgeRef, borderNow ?? 'transparent', 'borderColor', borderNow ? (borderNow.startsWith('var(') ? 'Theme' : borderNow) : 'None')}
+                    </div>
+                  </div>
+                </div>
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="w-[46px] text-[11px] text-[#7B8FA5]">Weight</span>
+                  <MiniRange min={0} max={8} value={borderNow ? bw : 0} label="Border weight" onChange={setBorderWidth} />
+                  <span className="w-7 text-right text-[11px] tabular-nums text-[#364658]">{borderNow ? bw : 0}px</span>
+                </div>
+
+                <div className="mt-3">{head('Corners')}</div>
+                <div className="flex gap-1.5">
+                  {LOOK_CORNERS.map((c) => (
+                    <StyleTile key={c.key} on={cornerKey === c.key} label={c.label}
+                      onClick={() => putBox({ radius: c.r === null ? undefined : c.r })}>
+                      <span className="h-[16px] w-[24px] border border-[#B6C2D5] bg-white" style={{ borderRadius: c.tile }} />
+                    </StyleTile>
+                  ))}
+                </div>
+
+                <div className="mt-3">{head('Shadow')}</div>
+                <div className="flex gap-1.5">
+                  {LOOK_SHADOWS.map((s) => (
+                    <StyleTile key={s.key} on={shadowKey === s.key} label={s.label} onClick={() => setShadow(s)}>
+                      <span className="h-[16px] w-[24px] rounded-[3px] bg-white" style={{ boxShadow: s.tile, border: s.key === 'none' ? '1px solid #DDE3EA' : undefined }} />
+                    </StyleTile>
                   ))}
                 </div>
               </div>
-            )}
-            {boxOk && (
-              <>
-                <button
-                  onClick={() => setCustom((x) => !x)}
-                  className="mt-3 flex w-full items-center gap-1.5 border-t border-[#F0F2F5] px-3 py-2.5 text-left text-[12px] font-medium text-[#364658] transition-colors hover:bg-[#F8FAFC]"
-                >
-                  <ChevronRight size={13} className={`text-[#94A3B8] transition-transform ${custom ? 'rotate-90' : ''}`} />
-                  Customise
-                  <span className="ml-auto text-[11px] font-normal text-[#9CA3AF]">colour, edge, corners, shadow</span>
-                </button>
-                {custom && (
-                  <div className="border-t border-[#F0F2F5] px-3 pb-3 pt-2.5">
-                    {label('Background')}
-                    {swatchBtn(bgRef, bgNow ?? 'transparent', 'bg', bgNow ? (bgNow.startsWith('var(') ? 'Theme tint' : bgNow) : 'Page style')}
-                    {label('Edge')}
-                    <div className="flex items-center gap-2">
-                      <MiniRange min={0} max={8} value={borderNow ? bw : 0} label="Border weight" onChange={setBorderWidth} />
-                      <span className="w-9 text-right text-[12px] tabular-nums text-[#364658]">{borderNow ? bw : 0}px</span>
-                    </div>
-                    {!!borderNow && <div className="mt-2">{swatchBtn(edgeRef, borderNow, 'borderColor', borderNow.startsWith('var(') ? 'Theme tint' : borderNow)}</div>}
-                    {label('Corners')}
-                    <div className="flex items-center gap-2">
-                      <MiniRange min={0} max={32} value={radius} label="Corner radius" onChange={(v) => putBox({ radius: v })} />
-                      <span className="w-9 text-right text-[12px] tabular-nums text-[#364658]">{radius}px</span>
-                    </div>
-                    {label('Shadow')}
-                    <div className="pill-track">
-                      {LOOK_SHADOWS.map((s) => (
-                        <button key={s.key} aria-pressed={shadowKey === s.key}
-                          onClick={() => putStyle(s.color ? { shadowOn: true, shadowColor: s.color, shadowType: 'outer', shadowPos: 'bottom', elevation: undefined } : { shadowOn: false, elevation: 'flat' })}
-                          className="flex-1 rounded py-1 text-[11.5px] font-medium text-[#7B8FA5]">{s.label}</button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
             )}
           </div>
           {at && (
@@ -1455,7 +1499,8 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
               onClose={() => setAt(null)}
             />
           )}
-        </>
+        </>,
+        document.body,
       )}
     </div>
   );
