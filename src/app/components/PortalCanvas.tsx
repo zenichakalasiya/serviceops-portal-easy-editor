@@ -1251,11 +1251,13 @@ function ShadowMenu({ id }: { id: string }) {
 type LookDef = { id: string; label: string; bg: string; border: string | null; shadow: string | null; tile: React.CSSProperties };
 const LOOKS: LookDef[] = [
   { id: 'regular', label: 'Regular', bg: '#FFFFFF', border: '#E5E7EB', shadow: null,
-    tile: { background: '#FFFFFF', border: '1px solid #DDE3EA' } },
+    tile: { background: '#FFFFFF', border: '1px solid #D5DCE5' } },
+  /* The tiles EXAGGERATE the difference a little — at 34px a true 1px hairline and a true soft shadow
+     are indistinguishable, which is the confusion this row exists to remove. */
   { id: 'outline', label: 'Outline', bg: 'rgba(255,255,255,0)', border: '#94A3B8', shadow: null,
-    tile: { background: 'transparent', border: '1.5px solid #94A3B8' } },
+    tile: { background: 'transparent', border: '1.5px solid #64748B' } },
   { id: 'shadow', label: 'Shadow', bg: '#FFFFFF', border: null, shadow: 'rgba(16,24,40,0.12)',
-    tile: { background: '#FFFFFF', border: '1px solid transparent', boxShadow: '0 3px 8px -1px rgba(16,24,40,0.22)' } },
+    tile: { background: '#FFFFFF', border: '1px solid transparent', boxShadow: '0 4px 9px -2px rgba(16,24,40,0.38)' } },
 ];
 const LOOK_SHADOWS: { key: string; label: string; color: string | null; tile: string }[] = [
   { key: 'none', label: 'None', color: null, tile: 'none' },
@@ -1274,7 +1276,24 @@ const LOOK_CORNERS: { key: string; label: string; r: number | null; tile: number
 const STYLE_BOX_KEYS = ['bgFill', 'bg', 'dark:bg', 'borderMode', 'borderWidth', 'borderColor', 'dark:borderColor', 'borderStyle', 'radius', 'elevation', 'shadowOn', 'shadowColor', 'shadowType', 'shadowPos'];
 const CFG_BOX_KEYS = ['fill', 'bg', 'dark:bg', 'borderWidth', 'borderColor', 'dark:borderColor', 'radius'];
 
-/** One small picture tile — the shape the whole popup is built from. */
+/** A CORNER, drawn as the bent line it is — the shape a radius changes, and nothing else. Dashed
+ *  for Standard, which is not a radius of its own but "whatever the page uses". */
+function CornerGlyph({ r, dashed }: { r: number; dashed?: boolean }) {
+  return (
+    <svg width="18" height="18" viewBox="0 0 18 18" fill="none" aria-hidden>
+      <path
+        d={r > 0 ? `M3 16 V${3 + r} Q3 3 ${3 + r} 3 H16` : 'M3 16 V3 H16'}
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray={dashed ? '2.5 2.5' : undefined}
+      />
+    </svg>
+  );
+}
+
+/** One small picture tile — the card-style row is built from these. */
 function StyleTile({ on, label, onClick, children }: { on: boolean; label: string; onClick: () => void; children: ReactNode }) {
   return (
     <button onClick={onClick} aria-pressed={on} className="group flex min-w-0 flex-1 flex-col items-center gap-1">
@@ -1378,18 +1397,40 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
   const pairBg = colorPair(filled ? box : {}, 'bg', '#FFFFFF', putBox, viaCfg ? { fill: 'color' } : { bgFill: 'color' });
   const pairEdge = colorPair(box, 'borderColor', '#E5E7EB', putBox, viaCfg ? {} : { borderMode: 'line' });
 
-  /* A compact colour field — swatch + value, the height of one line. */
-  const swatch = (ref: React.RefObject<HTMLButtonElement | null>, value: string, key: 'bg' | 'borderColor', text: string) => (
-    <button
-      ref={ref}
-      onClick={() => setAt(at?.key === key ? null : { rect: ref.current!.getBoundingClientRect(), key })}
-      className="flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded border border-[#DFE5ED] px-1.5 text-left text-[11.5px] text-[#364658] transition-colors hover:bg-[#F5F7FA]"
-    >
-      <span className="size-3.5 flex-shrink-0 rounded-[3px] border border-[#CBD5E1]" style={{ background: value }} />
-      <span className="truncate">{text}</span>
-    </button>
+  /* ── The colour PILL — the Theme panel's round swatch, so a colour reads the same everywhere ──
+     A transparent value shows a chequerboard and an unset one a dashed ring: "no colour" and "the
+     page decides" are different answers, and a white dot would say neither. */
+  const pill = (ref: React.RefObject<HTMLButtonElement | null>, value: string | null, key: 'bg' | 'borderColor', label: string) => {
+    const clear = !!value && /^rgba\(.*,0\)$/.test(value.replace(/\s/g, ''));
+    return (
+      <button
+        ref={ref}
+        aria-label={label}
+        title={label}
+        onClick={() => setAt(at?.key === key ? null : { rect: ref.current!.getBoundingClientRect(), key })}
+        className={`size-[22px] flex-shrink-0 rounded-full transition-shadow hover:ring-2 hover:ring-[#3D8BD0]/25 ${
+          value ? 'border border-black/10' : 'border border-dashed border-[#94A3B8]'
+        } ${at?.key === key ? 'ring-2 ring-[#3D8BD0]/40' : ''}`}
+        style={value && !clear
+          ? { background: value }
+          : clear
+          ? { background: 'repeating-conic-gradient(#E2E8F0 0% 25%, #FFFFFF 0% 50%) 50% / 8px 8px' }
+          : { background: '#FFFFFF' }}
+      />
+    );
+  };
+  const name = (v: string | null, none: string) => !v ? none
+    : v.startsWith('var(') ? 'Theme tint'
+    : /^rgba\(.*,0\)$/.test(v.replace(/\s/g, '')) ? 'Transparent'
+    : v.toUpperCase();
+  /* A section's title, with what it is set to on the right — the strips below are glyphs and words,
+     so the current value is stated once in plain words where it can be read without hovering. */
+  const head = (t: string, value?: string) => (
+    <div className="mb-1.5 flex items-baseline justify-between">
+      <span className="text-[11.5px] font-medium text-[#364658]">{t}</span>
+      {value && <span className="text-[11px] text-[#9CA3AF]">{value}</span>}
+    </div>
   );
-  const head = (t: string) => <p className="mb-1.5 text-[11px] font-medium text-[#7B8FA5]">{t}</p>;
 
   return (
     <div className="relative">
@@ -1421,69 +1462,74 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
               )}
             </div>
 
+            {/* ⚠️ THREE QUESTIONS, THREE SHAPES. The first version drew every row as the same small
+                white rectangle, so the card styles, the corners and the shadows looked like one control
+                repeated three times. Now each answers in its own visual language:
+                  · Card style — a little CARD (heading + text lines) wearing the style;
+                  · Corners    — a CORNER, drawn as a bent line, in a strip of glyphs;
+                  · Shadow     — WORDS, in a strip.
+                No two rows share a shape, so a glance says which question a row is asking. */}
             {boxOk ? (
-              /* ── ONE row: three ready styles and Custom ── */
               <div className="flex gap-1.5">
                 {LOOKS.map((l) => (
                   <StyleTile key={l.id} on={preset === l.id && !customOpen} label={l.label} onClick={() => applyLook(l)}>
-                    <span className="h-[18px] w-[26px] rounded-[4px]" style={l.tile} />
+                    <span className="flex h-[24px] w-[34px] flex-col justify-center gap-[3px] rounded-[4px] px-[5px]" style={l.tile}>
+                      <span className="h-[3px] w-[60%] rounded-full bg-[#64748B]/70" />
+                      <span className="h-[2px] w-full rounded-full bg-[#94A3B8]/45" />
+                      <span className="h-[2px] w-[70%] rounded-full bg-[#94A3B8]/45" />
+                    </span>
                   </StyleTile>
                 ))}
                 <StyleTile on={showCustom} label="Custom" onClick={() => setCustomOpen((x) => !x)}>
-                  <Settings2 size={14} className="text-[#64748B]" />
+                  <Settings2 size={15} className={showCustom ? 'text-[#3D8BD0]' : 'text-[#64748B]'} />
                 </StyleTile>
               </div>
-            ) : (
-              /* A button or an icon badge paints its box elsewhere — the shadow is all this bar reaches. */
+            ) : null}
+
+            {/* A button or an icon badge paints its box elsewhere — the shadow is all this bar reaches. */}
+            {!boxOk && (
               <>
-                {head('Shadow')}
-                <div className="flex gap-1.5">
+                {head('Shadow', LOOK_SHADOWS.find((s) => s.key === shadowKey)?.label)}
+                <div className="pill-track">
                   {LOOK_SHADOWS.map((s) => (
-                    <StyleTile key={s.key} on={shadowKey === s.key} label={s.label} onClick={() => setShadow(s)}>
-                      <span className="h-[16px] w-[24px] rounded-[3px] bg-white" style={{ boxShadow: s.tile }} />
-                    </StyleTile>
+                    <button key={s.key} aria-pressed={shadowKey === s.key} onClick={() => setShadow(s)}
+                      className="flex-1 rounded py-1 text-[11.5px] font-medium text-[#7B8FA5]">{s.label}</button>
                   ))}
                 </div>
               </>
             )}
 
             {showCustom && (
-              <div className="mt-3 border-t border-[#F0F2F5] pt-3">
-                {/* Fill and edge share a row: two compact colour fields, the edge weight beside its colour. */}
-                <div className="flex gap-2">
-                  <div className="min-w-0 flex-1">
-                    {head('Background')}
-                    <div className="flex">{swatch(bgRef, bgNow ?? 'transparent', 'bg', !bgNow ? 'Page style' : bgNow.startsWith('var(') ? 'Theme tint' : /^rgba\(.*,0\)$/.test(bgNow.replace(/\s/g, '')) ? 'Transparent' : bgNow)}</div>
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    {head('Border')}
-                    <div className="flex items-center gap-1">
-                      {swatch(edgeRef, borderNow ?? 'transparent', 'borderColor', borderNow ? (borderNow.startsWith('var(') ? 'Theme' : borderNow) : 'None')}
-                    </div>
-                  </div>
+              <div className="mt-3 border-t border-[#EEF1F5] pt-3">
+                {/* ── Colour rows: a label, then (for the border) its weight, then the colour pill ── */}
+                <div className="flex h-8 items-center gap-2.5">
+                  <span className="w-[66px] flex-shrink-0 text-[11.5px] font-medium text-[#364658]">Background</span>
+                  <span className="min-w-0 flex-1 truncate text-right text-[11px] text-[#9CA3AF]">{name(bgNow, 'Page style')}</span>
+                  {pill(bgRef, bgNow, 'bg', 'Background colour')}
                 </div>
-                <div className="mt-2 flex items-center gap-2">
-                  <span className="w-[46px] text-[11px] text-[#7B8FA5]">Weight</span>
+                <div className="flex h-8 items-center gap-2.5">
+                  <span className="w-[66px] flex-shrink-0 text-[11.5px] font-medium text-[#364658]">Border</span>
                   <MiniRange min={0} max={8} value={borderNow ? bw : 0} label="Border weight" onChange={setBorderWidth} />
-                  <span className="w-7 text-right text-[11px] tabular-nums text-[#364658]">{borderNow ? bw : 0}px</span>
+                  <span className="w-7 flex-shrink-0 text-right text-[11px] tabular-nums text-[#64748B]">{borderNow ? bw : 0}px</span>
+                  {pill(edgeRef, borderNow, 'borderColor', 'Border colour')}
                 </div>
 
-                <div className="mt-3">{head('Corners')}</div>
-                <div className="flex gap-1.5">
+                <div className="mt-3">{head('Corners', LOOK_CORNERS.find((c) => c.key === cornerKey)?.label ?? 'Custom')}</div>
+                <div className="pill-track">
                   {LOOK_CORNERS.map((c) => (
-                    <StyleTile key={c.key} on={cornerKey === c.key} label={c.label}
-                      onClick={() => putBox({ radius: c.r === null ? undefined : c.r })}>
-                      <span className="h-[16px] w-[24px] border border-[#B6C2D5] bg-white" style={{ borderRadius: c.tile }} />
-                    </StyleTile>
+                    <button key={c.key} aria-pressed={cornerKey === c.key} title={c.key === 'standard' ? 'Standard — follows the page' : c.label}
+                      onClick={() => putBox({ radius: c.r === null ? undefined : c.r })}
+                      className="flex flex-1 items-center justify-center rounded py-1 text-[#64748B]">
+                      <CornerGlyph r={c.key === 'standard' ? 5 : c.key === 'sharp' ? 0 : c.key === 'rounded' ? 5 : 10} dashed={c.key === 'standard'} />
+                    </button>
                   ))}
                 </div>
 
-                <div className="mt-3">{head('Shadow')}</div>
-                <div className="flex gap-1.5">
+                <div className="mt-3">{head('Shadow', LOOK_SHADOWS.find((s) => s.key === shadowKey)?.label ?? 'Custom')}</div>
+                <div className="pill-track">
                   {LOOK_SHADOWS.map((s) => (
-                    <StyleTile key={s.key} on={shadowKey === s.key} label={s.label} onClick={() => setShadow(s)}>
-                      <span className="h-[16px] w-[24px] rounded-[3px] bg-white" style={{ boxShadow: s.tile, border: s.key === 'none' ? '1px solid #DDE3EA' : undefined }} />
-                    </StyleTile>
+                    <button key={s.key} aria-pressed={shadowKey === s.key} onClick={() => setShadow(s)}
+                      className="flex-1 rounded py-1 text-[11.5px] font-medium text-[#7B8FA5]">{s.label}</button>
                   ))}
                 </div>
               </div>
