@@ -17,6 +17,12 @@
  * declared above the bare `Add a `, so anything else beginning `Add a …` — a question, a slide, a
  * link — falls through to Shift+A. A new collection's own wording needs no change here. */
 
+/** PARKED (30 Sep 2026, Zeni): the floating toolbar's MOVE arrows — left/right, and up/down on a
+ *  vertical parent — and the bare-arrow keys that press them. Switched off, not deleted: set this to
+ *  `true` and the buttons, the keys and the shortcut-sheet row all come back. See future-tasks.md §6.
+ *  Dragging (the grip) still moves anything anywhere. */
+export const SHOW_MOVE_ARROWS = false;
+
 export interface ToolbarKey {
   /** What the tooltip and the sheet print. Arrows and `Del` are written as the glyph, not the code. */
   keys: string[];
@@ -38,12 +44,12 @@ export const TOOLBAR_KEYS = {
   moveRight: { keys: ['→'], tips: ['Move right'] },
   moveUp: { keys: ['↑'], tips: ['Move up'] },
   moveDown: { keys: ['↓'], tips: ['Move down'] },
-  /* style — ONE key for the Style popup, which holds the looks and every box control. B, O and C
-     stay for the banner, whose background, border and corners are still separate buttons. */
+  /* style — ONE key for the Style popup (look, colour, edge, shadow). */
   style: { keys: ['L'], tips: ['Style'] },
   background: { keys: ['B'], tips: ['Background colour', 'Banner background'] },
   border: { keys: ['O'], tips: ['Border'] },
   radius: { keys: ['C'], tips: ['Corner radius'] },
+  shadow: { keys: ['D'], tips: ['Shadow'] },
   alignH: { keys: ['H'], tips: ['Horizontal alignment'] },
   alignV: { keys: ['V'], tips: ['Vertical alignment'] },
   icon: { keys: ['I'], tips: ["The glyph's colour"] },
@@ -57,28 +63,10 @@ export type ToolbarAction = keyof typeof TOOLBAR_KEYS;
 /** The prefixes one action's button can carry — what `PortalShortcuts` presses. */
 export const tipsOf = (a: ToolbarAction): string[] => TOOLBAR_KEYS[a].tips;
 
-/* ── Single-key shortcuts are OPT-IN ─────────────────────────────────────────────────────────────
- *
- * ⚠️ Off by default. An admin who clicks a card and then starts typing — expecting to edit its words —
- * used to fire B, O, C, D, H, V… and open popups they never asked for. Delete, the arrows, Enter, Esc
- * and every Ctrl / Alt combination stay on for everyone; the bare letters are for the people who went
- * looking for them, and the shortcut sheet is where they are switched on.
- * Stored per browser: it is a habit of the person at this keyboard, not a property of the portal. */
-const LETTERS_KEY = 'portalLetterKeys';
-export const lettersOn = (): boolean => {
-  try { return localStorage.getItem(LETTERS_KEY) === 'on'; } catch { return false; }
-};
-export const setLettersOn = (v: boolean) => {
-  try { localStorage.setItem(LETTERS_KEY, v ? 'on' : 'off'); } catch { /* storage blocked — stays off */ }
-};
-/** A shortcut that is one bare letter — what the opt-in governs. */
-export const isBareLetter = (keys: string[]) => keys.length === 1 && /^[A-Z]$/.test(keys[0]);
-
-/** The keys a tooltip should print, or null where the button has no shortcut — or where its only
- *  shortcut is a letter that is switched off, so a tooltip never promises a key that does nothing. */
+/** The keys a tooltip should print, or null where the button has no shortcut. */
 export function keysForTip(label: string): string[] | null {
   for (const entry of Object.values(TOOLBAR_KEYS) as ToolbarKey[]) {
-    if (entry.tips.some((t) => label.startsWith(t))) return isBareLetter(entry.keys) && !lettersOn() ? null : entry.keys;
+    if (entry.tips.some((t) => label.startsWith(t))) return entry.keys;
   }
   return null;
 }

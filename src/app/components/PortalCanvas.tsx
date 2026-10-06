@@ -8,25 +8,31 @@ import {
   AlignCenter, AlignCenterHorizontal, AlignCenterVertical, AlignEndHorizontal, AlignEndVertical,
   AlignLeft, AlignRight, AlignStartHorizontal, AlignStartVertical, StretchHorizontal, StretchVertical,
   ArrowDownToLine, ArrowLeftToLine, ArrowRightToLine, ArrowUpToLine, Baseline, Bold, Check, ChevronDown, ChevronRight, Columns2, Copy, GripHorizontal, GripVertical, Italic, Link2, Rows2,
-  Braces, Highlighter, Maximize2, UnfoldVertical, Move, MoveHorizontal, MoveVertical, Plus, RemoveFormatting,
-  PaintBucket, Paintbrush, Replace, Settings2, SquareDashed, SquareRoundCorner, SquareSquare, Trash2, Underline, X, ImagePlus, Palette, LayoutDashboard, Columns3,
+  Braces, Pencil, Highlighter, Maximize2, UnfoldVertical, Move, Plus, RemoveFormatting,
+  PaintBucket, Replace, SquareDashed, SquareRoundCorner, SquareSquare, Trash2, Underline, X, ImagePlus, Palette, LayoutDashboard, Columns3,
+  LayoutGrid, LayoutTemplate,
+  Paintbrush, Settings2, MoveHorizontal, MoveVertical,
 } from 'lucide-react';
+import { SectionPresets } from './PortalSectionLayout';
+import type { PresetId } from './PortalSectionLayout';
+import { TemplatePicker } from './PortalSectionControls';
 import { BannerFillEditor, BannerLayoutPanel, OverlayLayerEditor, TilePresetPicker } from './PortalBannerTools';
 import { bannerBoxId, flipRoot, groupOf } from './portalBannerLayout';
 import type { BannerNode } from './portalBannerLayout';
 import { BANNER_GROUPS, bannerGroupGap } from './portalPageModel';
-import { keysForTip, chromeKeys, lettersOn } from './portalShortcutKeys';
+import { keysForTip, chromeKeys, SHOW_MOVE_ARROWS } from './portalShortcutKeys';
 import { usePopupArrows, useOpenValue } from './usePopupArrows';
 import { toast } from 'sonner';
 import { MiniRange } from './PortalRange';
-import { fillsFromConfig, HEADING_SIZE, PORTAL_FONTS, SECTION_LAYOUTS, SPLITTABLE_BANDS, TEXT_STYLES, ZERO_BOX, COMPOSABLE, BANNER_BLOCKS, inBanner, dragIdOf, isContactChild, boxInfo, canAddBeside, defaultAlignH, nodeById, paintsOwnShadow, paintsOwnSurface, toolbarCaps, nodePath, placedIn, placedType } from './portalPageModel';
+import { fillsFromConfig, HEADING_SIZE, PORTAL_FONTS, SECTION_LAYOUTS, SPLITTABLE_BANDS, TEXT_STYLES, ZERO_BOX, COMPOSABLE, BANNER_BLOCKS, inBanner, dragIdOf, isContactChild, boxInfo, canAddBeside, defaultAlignH, nodeById, paintsOwnShadow, isSectionBox, colAlign, HUGS_CONTENT as HUGS, isAlignCard, cardTemplateOf, cardAlignAxis, cardAlignDefault, measuredTileCols, presetForCols, paintsOwnSurface, toolbarCaps, nodePath, placedIn, placedType } from './portalPageModel';
 import { DEFAULT_THEME } from './PortalThemePanel';
 import type { PortalTheme } from './PortalThemePanel';
 import { boxCss, containerCss, portalColorMode } from './portalStyleResolver';
 import { PORTAL_ELEMENTS, PORTAL_ELEMENT_GROUPS, isPredefinedElement, isPredefinedType } from './supportPortalData';
 import type { PortalElement } from './supportPortalData';
 import { elementIcon } from './SupportPortalAddPanel';
-import { PortalColorPicker, type ColorPair } from './PortalColorPicker';
+import { PortalColorPicker, ColorField, type ColorPair } from './PortalColorPicker';
+import { DesignGroupsCtx, Field, Group, Segmented, SelectField, ToggleRow } from './PortalControls';
 import type { BoxDir, NodeStyle, PortalStyles, SpacingBox } from './portalPageModel';
 
 /* Canvas selection layer.
@@ -125,6 +131,8 @@ interface CanvasCtx {
   /* Reads a widget's resolved config — the toolbar's button-style menu needs to show what is set,
      and a control that cannot read its own value can only ever guess which option to light. */
   cfg?: (id: string) => Record<string, unknown>;
+  /** A section's (or band's) Layout preset — the same call the panel's preset row makes. */
+  applyPreset?: (sectionId: string, preset: PresetId) => void;
   /** Adds one of the six in the slot beside an element. */
   addSibling?: (elementId: string, type: string) => void;
   /* The live theme. ⚠️ Only the text toolbar's font picker reads it, and it reads it to NAME the two
@@ -249,7 +257,7 @@ export function sizeOf(styles: PortalStyles, id: string): React.CSSProperties {
      KPI read their own align/alignY and place their content with it — moving the wrapper as well
      would shrink a tile out of its grid cell. */
   /* A widget on the BANNER is placed by its cell (see the arranged banner), so its alignment is not applied to itself. */
-  const alignsInside = /-tile$/.test(id) || isContactChild(id) || placedType(id) === 'c-records' || (/^el-\d+$/.test(id) && nodeById(id)?.parent === 'hero');
+  const alignsInside = isSectionBox(id) || /-tile$/.test(id) || /^quick-[a-z]+$/.test(id) || placedType(id) === 'x-action-card' || isContactChild(id) || placedType(id) === 'c-records' || (/^el-\d+$/.test(id) && nodeById(id)?.parent === 'hero');
   if (s.alignY !== undefined && !alignsInside) {
     css.alignSelf = ({ start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'stretch' } as const)[s.alignY];
   }
@@ -1014,7 +1022,7 @@ function IconMenu({ id }: { id: string }) {
   const service = /^(favourites|services)-tile$/.test(id);
   const rest = card
     ? { color: String(cardStyle.iconColor ?? '#475467'), bg: String(cardStyle.iconFill ?? '#F1F5F9'), radius: cardStyle.iconShape === 'circle' ? 999 : 4 }
-    : service ? { color: '#475467', bg: '#F1F5F9', radius: 8 }
+    : service ? { color: '#475467', bg: '#FFFFFF', radius: 8 }
     : { color: '#5A6B80', bg: '#FFFFFF', radius: 6 };
   const radius = Number(own.iconRadius ?? rest.radius);
   const bw = Number(own.iconBorderWidth ?? 0);
@@ -1231,6 +1239,155 @@ function ShadowMenu({ id }: { id: string }) {
   );
 }
 
+/* ── Layout — the white parent card's (and the Quick Actions row's) presets, as a popup ─────────────
+ * The same control the panel's Layout group draws, so the two cannot disagree. A white card lays out
+ * its four data cards by COLUMN COUNT (the style store's `columns`, §7.8); the Quick Actions row is a
+ * band and takes the section preset, through the same `applyPreset` the panel calls. */
+/* ── What a COLUMN's alignment can offer, MEASURED (Zeni, 29 Sep 2026) ─────────────────────────────
+ * An added section's box aligns the individual widgets it holds (Text, Button, Image, Custom Card,
+ * Custom Data Widget…). Predefined data widgets never count. Read off the canvas, because every rule
+ * is about what is on screen:
+ *  · Horizontal — something in it can move sideways: text (its lines), a hugging widget (a Button),
+ *    or a widget dragged NARROWER than its column. A full-width widget alone has nothing to move.
+ *  · Stretch (horizontal) — a Button, or a widget narrower than its column: "fill the width".
+ *  · Vertical — the column has SPARE HEIGHT (dragged taller, or a taller neighbour in the row).
+ *  · Stretch (vertical) — two or more widgets stacked: first to the top, last to the bottom.
+ * A value already chosen keeps its control, so a choice can always be undone. */
+export function useColumnAlign(id: string | null) {
+  const { styles } = useCanvas();
+  const [info, setInfo] = useState({ h: false, v: false, stretchH: false, stretchV: false });
+  useLayoutEffect(() => {
+    if (!id) return;
+    const el = document.querySelector(`[data-node="${id}"]`) as HTMLElement | null;
+    if (!el) return;
+    const TEXTS = new Set(['b-text', 'b-large-title', 'b-small-title']);
+    const measure = () => {
+      const widgets = ([...el.querySelectorAll('[data-node]')] as HTMLElement[]).filter((w) => {
+        const wid = w.dataset.node ?? '';
+        if (!/^el-\d+$/.test(wid)) return false;
+        const t = placedType(wid);
+        return !!t && !isPredefinedType(t);
+      });
+      const own = colAlign(styles as never, id);
+      if (!widgets.length) {
+        setInfo((p) => (p.h || p.v || p.stretchH || p.stretchV ? { h: false, v: false, stretchH: false, stretchV: false } : p));
+        return;
+      }
+      let h = false;
+      let stretchH = false;
+      for (const w of widgets) {
+        const t = placedType(w.dataset.node!) ?? '';
+        const cell = w.parentElement?.getBoundingClientRect();
+        const narrow = !!cell && w.getBoundingClientRect().width < cell.width - 2;
+        if (TEXTS.has(t) || HUGS.has(t) || narrow) h = true;
+        if (t === 'b-button' || (narrow && !TEXTS.has(t))) stretchH = true;
+      }
+      if (own.h) { h = true; if (own.h === 'stretch') stretchH = true; }
+      const box = ([...el.children] as HTMLElement[]).find((c) => getComputedStyle(c).position !== 'absolute') ?? el;
+      const tops = widgets.map((w) => w.getBoundingClientRect().top);
+      const bottoms = widgets.map((w) => w.getBoundingClientRect().bottom);
+      const span = Math.max(...bottoms) - Math.min(...tops);
+      let v = box.getBoundingClientRect().height - span > 4;
+      if (own.v) v = true;
+      const stacked = new Set(tops.map((t) => Math.round(t))).size >= 2;
+      const stretchV = v && stacked;
+      const next = { h, v, stretchH: h && stretchH, stretchV };
+      setInfo((p) => (p.h === next.h && p.v === next.v && p.stretchH === next.stretchH && p.stretchV === next.stretchV ? p : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    el.querySelectorAll('[data-node]').forEach((c) => ro.observe(c));
+    return () => ro.disconnect();
+  }, [id, styles]);
+  return id ? info : null;
+}
+
+/** Escape closes a toolbar popup, the way every other one on the bar closes. */
+function useEscapeClose(open: boolean, close: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const on = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); close(); } };
+    window.addEventListener('keydown', on, true);
+    return () => window.removeEventListener('keydown', on, true);
+  });
+}
+
+function LayoutMenu({ id }: { id: string }) {
+  const { styles, setStyle, cfg, applyPreset } = useCanvas();
+  const [open, setOpen] = useState(false);
+  useEscapeClose(open, () => setOpen(false));
+  const band = id === 'quick';
+  const c = cfg?.(id) ?? {};
+  let count = 4;
+  let current: PresetId;
+  let pick: (p: PresetId) => void;
+  if (band) {
+    count = Number(c.__count ?? 4);
+    current = (c.__preset as PresetId) ?? 'cols';
+    pick = (p) => applyPreset?.(id, p);
+  } else {
+    const own = Number(styles[id]?.columns) || 0;
+    current = presetForCols(own || measuredTileCols(id) || 4);
+    pick = (p) => setStyle(id, { columns: p === 'stack' ? 1 : p === 'grid' ? 2 : p === 'three' ? 3 : 4 } as never);
+  }
+  return (
+    <div className="relative">
+      <button
+        className={open ? btnOn : btn}
+        data-tip="Layout"
+        onClick={() => setOpen((v) => !v)}
+      ><LayoutGrid size={15} /></button>
+      {open && (
+        <>
+          <span className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="absolute left-1/2 top-[calc(100%+8px)] z-[61] w-[240px] -translate-x-1/2 rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]"
+          >
+            <p className="mb-2 text-[12px] font-medium text-[#364658]">Layout</p>
+            <SectionPresets count={count} current={current} onPick={pick} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── Card templates — where a data card's icon sits, as a popup ───────────────────────────────────
+ * A data tile writes its WIDGET's `cardTemplate` (every tile in the card shares one), an action card
+ * its own — the same keys the panel's Card templates row writes. Changing it can move the card's free
+ * axis, which is why the alignment button beside it re-reads the template every render. */
+function CardTemplateMenu({ id }: { id: string }) {
+  const { cfg, setCfg } = useCanvas();
+  const [open, setOpen] = useState(false);
+  useEscapeClose(open, () => setOpen(false));
+  const tile = /^(.+)-tile$/.exec(id);
+  const owner = tile ? tile[1] : id;
+  const value = cardTemplateOf(id, cfg);
+  return (
+    <div className="relative">
+      <button
+        className={open ? btnOn : btn}
+        data-tip="Card templates"
+        onClick={() => setOpen((v) => !v)}
+      ><LayoutTemplate size={15} /></button>
+      {open && (
+        <>
+          <span className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="absolute left-1/2 top-[calc(100%+8px)] z-[61] w-[300px] -translate-x-1/2 rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]"
+          >
+            <p className="mb-2 text-[12px] font-medium text-[#364658]">Card templates</p>
+            <TemplatePicker value={value} onChange={(v) => setCfg(owner, { cardTemplate: v })} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 /* ── STYLE — one labelled button for the whole look of a block ───────────────────────────────────
  *
  * ⚠️ It REPLACES four icon buttons — background, border, corner radius and shadow — with ONE row of
@@ -1308,9 +1465,12 @@ function StyleTile({ on, label, onClick, children }: { on: boolean; label: strin
   );
 }
 
-function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
+/* ⚠️ `panel` draws the SAME body inline as the sidebar's one Style group — one component, so the
+   toolbar popup and the sidebar can never offer different looks or write different keys. */
+function StyleMenu({ id, boxOk, panel = false }: { id: string; boxOk: boolean; panel?: boolean }) {
   const { styles, setStyle, cfg, setCfg } = useCanvas();
-  const [open, setOpen] = useState(false);
+  const [openState, setOpen] = useState(false);
+  const open = panel || openState;
   const [customOpen, setCustomOpen] = useState(false);
   const [at, setAt] = useState<{ rect: DOMRect; key: 'bg' | 'borderColor' } | null>(null);
   /* ⚠️ The popup is placed against the WINDOW, not the toolbar. Hung under the button it ran off the
@@ -1330,7 +1490,7 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
       : { left, bottom: window.innerHeight - r.top + 6, maxH: above });
   };
   useEffect(() => {
-    if (!open) return;
+    if (!open || panel) return;
     measure();
     window.addEventListener('resize', measure);
     window.addEventListener('scroll', measure, true);
@@ -1437,33 +1597,34 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
     </div>
   );
 
+  const portalOr = (n: ReactNode, t: Element) => (panel ? n : createPortal(n, t));
   return (
     <div className="relative">
-      <button
+      {!panel && <button
         ref={trigRef}
         className={`${textBtn} ${open ? 'bg-[var(--bar-on-bg,#EBF5FF)] text-[var(--bar-on-ink,#3D8BD0)]' : ''}`}
         data-tip="Style — how this block looks"
         onClick={() => { setAt(null); setOpen((x) => !x); }}
-      ><Paintbrush size={14} />Style<ChevronDown size={12} className="text-[#9CA3AF]" /></button>
-      {open && place && createPortal(
+      ><Paintbrush size={14} />Style<ChevronDown size={12} className="text-[#9CA3AF]" /></button>}
+      {open && (place || panel) && portalOr(
         <>
-          <span className="fixed inset-0 z-[9998]" onClick={() => { setOpen(false); setAt(null); }} />
+          {!panel && <span className="fixed inset-0 z-[9998]" onClick={() => { setOpen(false); setAt(null); }} />}
           <div
             ref={popRef}
             data-portal-popover
             onClick={(e) => e.stopPropagation()}
-            className="fixed z-[9999] w-[300px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]"
-            style={{ left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxH }}
+            className={panel ? '' : 'fixed z-[9999] w-[300px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]'}
+            style={panel || !place ? undefined : { left: place.left, top: place.top, bottom: place.bottom, maxHeight: place.maxH }}
           >
             <div className="mb-2 flex items-center justify-between gap-2">
-              <p className="text-[12.5px] font-semibold text-[#1E293B]">Card style</p>
+              <p className="text-[12.5px] font-semibold text-[#1E293B]">{panel ? '' : 'Card style'}</p>
               {!ownKeys ? (
                 <span className="inline-flex items-center gap-1 rounded-full bg-[#ECFDF3] px-1.5 py-0.5 text-[10px] font-medium text-[#067647]">
-                  <Check size={10} /> Page style
+                  <Check size={10} /> Default
                 </span>
               ) : (
                 <button onClick={usePage} className="rounded px-1 py-0.5 text-[11px] font-medium text-[#3D8BD0] transition-colors hover:bg-[#EBF5FF]">
-                  Use page style
+                  Reset to default
                 </button>
               )}
             </div>
@@ -1510,7 +1671,7 @@ function StyleMenu({ id, boxOk }: { id: string; boxOk: boolean }) {
                 {/* ── Colour rows: a label, then (for the border) its weight, then the colour pill ── */}
                 <div className="flex h-8 items-center gap-2.5">
                   <span className="w-[66px] flex-shrink-0 text-[11.5px] font-medium text-[#364658]">Background</span>
-                  <span className="min-w-0 flex-1 truncate text-right text-[11px] text-[#9CA3AF]">{name(bgNow, 'Page style')}</span>
+                  <span className="min-w-0 flex-1 truncate text-right text-[11px] text-[#9CA3AF]">{name(bgNow, 'Default')}</span>
                   {pill(bgRef, bgNow, 'bg', 'Background colour')}
                 </div>
                 <div className="flex h-8 items-center gap-2.5">
@@ -1746,6 +1907,7 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
   const [adding, setAdding] = useState(false);
   const [swapping, setSwapping] = useState(false);
   const [axis, setAxis] = useState<'h' | 'v' | null>(null);
+  const colInfo = useColumnAlign(isSectionBox(id) ? id : null);
   /* A Custom Data Widget drawn as a KPI takes both alignments — it places its number and title inside itself. The list form keeps none. */
   const kpi = placedType(id) === 'c-records' && cfg?.(id)?.display === 'kpi';
   const caps = kpi ? { ...toolbarCaps(id), alignH: undefined, alignV: undefined } : toolbarCaps(id);
@@ -1806,7 +1968,8 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
   /* One of the six a section is composed from — see `COMPOSABLE`. These get BOTH actions: "+" puts
      another of the six in the slot BESIDE this one, Replace swaps this one. Everything else keeps
      the single Add-or-Replace slot it always had. */
-  const composable = canAddBeside(id);
+  /* A placed Text's outline toolbar is drag · replace · copy · alignment · background · delete only. */
+  const composable = canAddBeside(id) && placedType(id) !== 'b-text';
   /* ⚠️ ON THE BANNER both pickers offer the banner's curated blocks and nothing else — the same list
      the builder's gate enforces, so the list never offers something the drop would then refuse. */
   const onBanner = inBanner(id);
@@ -1850,8 +2013,10 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
      on the tile itself, which is what makes all four cards restyle together — the thing the shared id is
      for. */
   const iconTarget = isIcon || /-tile$/.test(id) ? id : isActionCard ? `${id}-icon` : null;
+  /* `iconTarget` no longer counts: the Icon popup left the bar (it is in the sidebar). */
+  void iconTarget;
   const named = placedType(id) === 'b-button' || placedType(id) === 'b-accordion'
-    || placedType(id) === 'c-faq' || placedType(id) === 'v-image' || !!caps.extLink || !!iconTarget;
+    || placedType(id) === 'c-faq' || placedType(id) === 'v-image' || !!caps.extLink;
   const swapType = swaps && swapTarget ? placedType(swapTarget) : undefined;
   const secKind = sectionKind?.(id) ?? 'empty';
   const allow = (e: PortalElement) => {
@@ -1888,20 +2053,36 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
      down?"); laying all six out flat makes one row of near-identical glyphs where the pairing is
      invisible, and doubles a toolbar that already competes for width. The axis button shows the
      option currently set, so the bar still answers both questions at a glance. */
-  const alignH = String(styles[id]?.align ?? defaultAlignH(id));
-  const alignV = String(styles[id]?.alignY ?? 'start');
-  const H_OPTS: [string, string, ReactNode][] = [
+  /* ⚠️ A data CARD aligns on ONE axis — the one its card template leaves free (cardAlignAxis) — and
+     without Stretch: its content is a badge and two lines of words, which have nothing to stretch to. */
+  const alignCard = isAlignCard(id);
+  const cardTpl = alignCard ? cardTemplateOf(id, cfg) : '';
+  const cardAxis = alignCard ? cardAlignAxis(cardTpl) : null;
+  const col = colInfo;
+  /* A placed Text always offers left / centre / right on its outline toolbar: it aligns its own words. */
+  const showH = placedType(id) === 'b-text' || (caps.alignH !== false && cardAxis !== 'v' && (!col || col.h));
+  const showV = caps.alignV !== false && cardAxis !== 'h' && (!col || col.v);
+  const alignH = String(styles[id]?.align ?? (alignCard ? cardAlignDefault(cardTpl, id) : col ? 'left' : defaultAlignH(id)));
+  const alignV = String(styles[id]?.alignY ?? (alignCard ? cardAlignDefault(cardTpl, id) : 'start'));
+  const H_OPTS_ALL: [string, string, ReactNode][] = [
     ['left', 'Left', <AlignStartVertical key="l" size={15} />],
     ['center', 'Centre', <AlignCenterVertical key="c" size={15} />],
     ['right', 'Right', <AlignEndVertical key="r" size={15} />],
-    ['stretch', 'Stretch', <MoveHorizontal key="s" size={15} />],
+    ['stretch', 'Stretch', <StretchHorizontal key="s" size={15} />],
   ];
-  const V_OPTS: [string, string, ReactNode][] = [
+  const V_OPTS_ALL: [string, string, ReactNode][] = [
     ['start', 'Top', <AlignStartHorizontal key="t" size={15} />],
     ['center', 'Middle', <AlignCenterHorizontal key="m" size={15} />],
     ['end', 'Bottom', <AlignEndHorizontal key="b" size={15} />],
-    ['stretch', 'Stretch', <MoveVertical key="s" size={15} />],
+    ['stretch', 'Stretch', <StretchVertical key="s" size={15} />],
   ];
+  const H_OPTS = alignCard || placedType(id) === 'b-text' || (col && !col.stretchH) ? H_OPTS_ALL.slice(0, 3) : H_OPTS_ALL;
+  const V_OPTS = alignCard || (col && !col.stretchV) ? V_OPTS_ALL.slice(0, 3) : V_OPTS_ALL;
+  /* The Layout and Card-templates buttons (Zeni, 29 Sep 2026): the white parent cards and the Quick
+     Actions row get Layout; the cards inside them get Card templates. */
+  const layoutOwner = ['favourites', 'services', 'assets', 'cis', 'quick'].includes(id)
+    || /^c-(favourites|services|assets|cis)$/.test(placedType(id) ?? '');
+  const templateCard = alignCard;
 
   /* ⚠️ INSTANT tooltips, and `data-tip` rather than `title`. A native title waits about a second
      before it appears, which on a row of seven unlabelled glyphs means you either already know what
@@ -1942,7 +2123,7 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
   const hasStructure =
     caps.drag !== false
     || !!caps.splitItem
-    || (caps.move !== false && !span.alone && moves.some(([, , , atEdge]) => !atEdge))
+    || (SHOW_MOVE_ARROWS && caps.move !== false && !span.alone && moves.some(([, , , atEdge]) => !atEdge))
     || !!(split && !split.blocked);
   const hasPlace =
     composable
@@ -1969,7 +2150,7 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
         <span
           {...useNodeDragHandle(id)}
           data-tip="Drag to move"
-          className="flex size-7 cursor-grab items-center justify-center text-[var(--bar-ink,#9CA3AF)] opacity-70 active:cursor-grabbing"
+          className="tb-grip flex size-7 cursor-grab items-center justify-center text-[var(--bar-ink,#9CA3AF)] opacity-70 active:cursor-grabbing"
         ><GripVertical size={14} /></span>
       )}
       {caps.splitItem && (
@@ -1983,7 +2164,8 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
           looked the same whether or not you could act on it, and the reason was a tooltip nobody
           hovers a dead button to read. One rule now, everywhere: if it is on the bar, pressing it
           does something. */}
-      {caps.move !== false && !span.alone && moves
+      {/* PARKED — see `SHOW_MOVE_ARROWS` and future-tasks.md §6. */}
+      {SHOW_MOVE_ARROWS && caps.move !== false && !span.alone && moves
         .filter(([, , , atEdge]) => !atEdge)
         .map(([label, ic, dir]) => (
           <button key={label} className={btn} data-tip={label} onClick={() => moveNode(id, dir)}>{ic}</button>
@@ -2178,7 +2360,10 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
           16px target inside a card, so reaching its colour meant knowing you could click it — and the
           card is what an admin has selected when they decide the glyph is the wrong colour. It writes
           the badge's own node either way (`${id}-icon`), so the two routes are one edit. */}
-      {iconTarget && <IconMenu id={iconTarget} />}
+      {/* ⚠️ ICON, BORDER, CORNER RADIUS and SHADOW left the floating toolbar (Zeni, 29 Sep 2026) — every
+          one of them is in the sidebar's Design section now (`DesignQuickSections`), and a bar carrying
+          the same four popups was two places for one value. The menus themselves stay in this file,
+          unused, so bringing one back is one line. Background colour, alignment and every action stay. */}
       {/* ⚠️ The banner's globe button is GONE. "Also use this background behind the whole page" put
           one block in charge of the page's background — a change you make while looking at the
           banner and then see everywhere else — and the page has its own background in Theme, which
@@ -2194,8 +2379,10 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
           "where does this go and how many are there". The three used to be scattered — alignment
           at the end, shadow beside Copy, colour not on the bar at all — so the bar read as a list
           of unrelated glyphs rather than as two answers with a line between them. */}
-      {(caps.alignH !== false || caps.alignV !== false || kind !== 'text' || placed) && <Rule />}
-      {caps.alignH !== false && (
+      {(showH || showV || layoutOwner || templateCard || kind !== 'text' || placed) && <Rule />}
+      {layoutOwner && <LayoutMenu id={id} />}
+      {templateCard && <CardTemplateMenu id={id} />}
+      {showH && (
         <AlignAxis
           axis="h"
           value={alignH}
@@ -2205,7 +2392,7 @@ function ElementToolbar({ id, kind, name }: { id: string; kind: string; name: st
           onPick={(v) => setStyle(id, { align: v as never })}
         />
       )}
-      {caps.alignV !== false && (
+      {showV && (
         <AlignAxis
           axis="v"
           value={alignV}
@@ -2268,11 +2455,56 @@ const MIN_BANNER_H = 260;
 /** The floor a south / north drag may take this node to. */
 const minHeightFor = (id: string) => (id === 'hero' ? MIN_BANNER_H : 24);
 
+/* ── A PARENT's handles set the GAP between its children (Zeni, 29 Sep 2026) ─────────────────────
+ * On a section (or box) that holds other sections, and on the built-in bands, the side handles change
+ * the section's WIDTH and the gap between its columns TOGETHER — the change goes into the gaps, so the
+ * columns keep their width until the gap reaches 0 — and the bottom handle changes the gap between its
+ * stacked ROWS (min 0), the section's height then following its content. A section holding ONE thing
+ * keeps the ordinary resize, and so do the predefined cards themselves (the two service rows are cards,
+ * so they are not on the list).
+ * ⚠️ The gaps are MEASURED off the rendered children, never read from config: wrapping, grids and
+ * nested boxes all decide where the space really is, and the pink bands are measured the same way. */
+const GAP_DRAG_BANDS = new Set(['quick', 'work', 'work-main', 'work-rail', 'records']);
+const isGapParent = (id: string) => /^sec-\d+(-b\d+)?$/.test(id) || GAP_DRAG_BANDS.has(id);
+/** The children of a parent, grouped into visual rows, and the gaps between them as they are drawn now. */
+function measureGaps(el: HTMLElement, id: string) {
+  /* ⚠️ EVERY laid-out child, not only ones carrying `data-node`: a built-in band draws each card inside a
+     wrapper (the order/share div), so its direct children are wrappers and a `data-node` filter found none.
+     Anything positioned out of the flow — a seam, an adder, a drop line — is not a member of the row. */
+  const laidOut = (b: HTMLElement) => Array.from(b.children).filter((k): k is HTMLElement => {
+    if (!(k instanceof HTMLElement)) return false;
+    const pos = getComputedStyle(k).position;
+    const r = k.getBoundingClientRect();
+    return pos !== 'absolute' && pos !== 'fixed' && r.width > 0 && r.height > 0;
+  });
+  /* ⚠️ A band can carry the marker TWICE — the Quick Actions `Sel` and the row inside it both say
+     `data-gap-parent="quick"` — and the outer one holds a single child (the row). The container is the
+     one that actually lays out more than one thing. */
+  const all = [...(el.matches(`[data-gap-parent="${id}"]`) ? [el] : []), ...Array.from(el.querySelectorAll<HTMLElement>(`[data-gap-parent="${id}"]`))];
+  const box = all.find((b) => laidOut(b).length > 1) ?? all[0];
+  if (!box) return null;
+  const kids = laidOut(box).map((k) => k.getBoundingClientRect());
+  const rows: DOMRect[][] = [];
+  for (const r of kids.sort((a, b) => a.top - b.top || a.left - b.left)) {
+    const line = rows.find((row) => Math.abs(row[0].top - r.top) < 3);
+    if (line) line.push(r); else rows.push([r]);
+  }
+  rows.forEach((row) => row.sort((a, b) => a.left - b.left));
+  const wide = rows.find((row) => row.length > 1);
+  const gapsX = Math.max(0, ...rows.map((row) => row.length - 1));
+  const gapX = wide ? Math.max(0, Math.round(wide[1].left - wide[0].right)) : 0;
+  const gapsY = Math.max(0, rows.length - 1);
+  const gapY = rows.length > 1 ? Math.max(0, Math.round(rows[1][0].top - Math.max(...rows[0].map((r) => r.bottom)))) : 0;
+  return { gapsX, gapX, gapsY, gapY };
+}
+
 function SelectionHandles({ id, elRef }: { id: string; elRef: React.RefObject<HTMLDivElement | null> }) {
-  const { styles, setStyle } = useCanvas();
-  const [live, setLive] = useState<{ kind: 'size' | 'padY' | 'padX' | 'gap'; label: string } | null>(null);
+  const { styles, setStyle, setCfg } = useCanvas();
+  const [live, setLive] = useState<{ kind: 'size' | 'padY' | 'padX' | 'gap' | 'gapX' | 'gapY'; label: string } | null>(null);
   const drag = useRef<{
-    kind: 'size' | 'padY' | 'padX' | 'gap'; corner: string; x: number; y: number;
+    /** The two gap drags a PARENT's handles make — see `isGapParent`. */
+    g0?: number; gn?: number;
+    kind: 'size' | 'padY' | 'padX' | 'gap' | 'gapX' | 'gapY'; corner: string; x: number; y: number;
     w: number; h: number; pad: SpacingBox; gap: number; parentW: number;
     /** How tall this element may become before it outgrows the section holding it. */
     maxH: number;
@@ -2302,6 +2534,29 @@ function SelectionHandles({ id, elRef }: { id: string; elRef: React.RefObject<HT
       if (!d) return;
       const dx = e.clientX - d.x;
       const dy = e.clientY - d.y;
+
+      /* A PARENT: width and column gap move together; the bottom edge sets the row gap. */
+      if (d.kind === 'gapX' || d.kind === 'gapY') {
+        /* Sections and bands go through the panel's own keys (`patchCfg` redirects them, and on a
+           section also clears the boxes inside); a box inside a section writes its own gap. */
+        const own = /^sec-\d+-b\d+$/.test(id);
+        if (d.kind === 'gapY') {
+          const v = Math.max(0, Math.min(200, Math.round((d.g0 ?? 0) + dy / Math.max(1, d.gn ?? 1))));
+          setCfg?.(id, own ? { gapY: v } : { gapPairY: v });
+          setLive({ kind: 'gapY', label: `${v}px row gap` });
+          return;
+        }
+        const west = d.corner.includes('w');
+        const maxW = west ? d.w + d.ml : d.contentW - d.ml;
+        const w = Math.max(MIN_COL, Math.min(maxW, d.w + (west ? -dx : dx)));
+        const v = Math.max(0, Math.min(200, Math.round((d.g0 ?? 0) + (w - d.w) / Math.max(1, d.gn ?? 1))));
+        const patch: Partial<NodeStyle> = { widthPct: Math.round((w / Math.max(1, d.contentW)) * 10000) / 100, flex: undefined, width: undefined };
+        if (west) patch.margin = { ...d.margin, left: Math.round(Math.max(0, d.ml + (d.w - w))) };
+        setStyle(id, patch);
+        setCfg?.(id, own ? { gapX: v } : { gapPairX: v });
+        setLive({ kind: 'gapX', label: `${v}px column gap` });
+        return;
+      }
 
       if (d.kind === 'size') {
         const patch: Partial<NodeStyle> = {};
@@ -2443,7 +2698,7 @@ function SelectionHandles({ id, elRef }: { id: string; elRef: React.RefObject<HT
     window.addEventListener('mousemove', move);
     window.addEventListener('mouseup', up);
     return () => { window.removeEventListener('mousemove', move); window.removeEventListener('mouseup', up); };
-  }, [id, setStyle]);
+  }, [id, setStyle, setCfg]);
 
   const begin = (e: React.MouseEvent, kind: 'size' | 'padY' | 'padX' | 'gap', corner = '') => {
     e.preventDefault();
@@ -2538,6 +2793,12 @@ function SelectionHandles({ id, elRef }: { id: string; elRef: React.RefObject<HT
         };
       })(),
     };
+    /* A PARENT's side handles and bottom handle set its gaps rather than resizing it alone. */
+    if (kind === 'size' && isGapParent(id) && (corner === 'e' || corner === 'w' || corner === 's')) {
+      const m = measureGaps(el, id);
+      if (m && corner === 's' && m.gapsY > 0) Object.assign(drag.current, { kind: 'gapY', g0: m.gapY, gn: m.gapsY });
+      else if (m && corner !== 's' && m.gapsX > 0) Object.assign(drag.current, { kind: 'gapX', g0: m.gapX, gn: m.gapsX });
+    }
     document.body.style.userSelect = 'none';
     document.body.style.cursor = kind === 'padY' || kind === 'gap' ? 'ns-resize'
       : kind === 'padX' ? 'ew-resize'
@@ -2595,6 +2856,8 @@ function SelectionHandles({ id, elRef }: { id: string; elRef: React.RefObject<HT
         </>
       )}
 
+      {/* The gaps being set, lit pink while you drag them. */}
+      {(live?.kind === 'gapX' || live?.kind === 'gapY') && <GapBands id={id} host={elRef} forceLit />}
       {corners.map(([c, cls]) => (
         <span key={c} onMouseDown={(e) => begin(e, 'size', c)} className={`${sq} ${cls} pointer-events-auto`} />
       ))}
@@ -2709,11 +2972,126 @@ function ToolbarTip({ tip }: { tip: ToolbarTipState | null }) {
   );
 }
 
-function TextToolbar({ id, editing = false }: { id: string; editing?: boolean }) {
-  const drag = useNodeDragHandle(id);
+/* ── TEXT: the formatting bar follows the HIGHLIGHTED WORDS (Zeni, 6 Oct 2026) ─────────────────────
+ *
+ * The bar no longer sits on the text's outline. It appears only while words are highlighted inside the
+ * text, floating just above them, and what it offers depends on HOW MUCH is highlighted:
+ *   · some words  → Bold · Italic · Underline · Font · Size · Text colour · Highlight · Clear · Link
+ *   · all of it   → the same, plus Text style (Paragraph / H1–H3) · Alignment · Placeholder
+ * because style, alignment and a placeholder act on the whole text, and offering them on three words
+ * would promise a change to those words that they would then make to everything.
+ * Outline only (or a caret with nothing highlighted): a placed Text shows its element toolbar (drag ·
+ * replace · copy · alignment · background · delete); text that is part of a widget shows alignment only. */
+type WordSel = { kind: 'none' | 'partial' | 'full'; rect: DOMRect | null };
+function useWordSelection(id: string, active: boolean): WordSel {
+  const [state, setState] = useState<WordSel>({ kind: 'none', rect: null });
+  useEffect(() => {
+    if (!active) { setState({ kind: 'none', rect: null }); return; }
+    const read = () => {
+      const host = document.querySelector(`[data-inline-edit="${id}"]`) as HTMLElement | null;
+      const sel = window.getSelection();
+      if (!host || !sel || !sel.rangeCount) return;
+      const r = sel.getRangeAt(0);
+      /* Focus moved into the bar or a popover it opened (a select, a hex field): keep the last answer,
+         or the bar would vanish under the control being used. */
+      if (!host.contains(r.commonAncestorContainer)) return;
+      const picked = r.toString().replace(/\s+/g, ' ').trim();
+      if (r.collapsed || !picked) { setState({ kind: 'none', rect: null }); return; }
+      const all = (host.textContent ?? '').replace(/\s+/g, ' ').trim();
+      setState({ kind: picked === all ? 'full' : 'partial', rect: r.getBoundingClientRect() });
+    };
+    read();
+    document.addEventListener('selectionchange', read);
+    window.addEventListener('scroll', read, true);
+    window.addEventListener('resize', read);
+    return () => {
+      document.removeEventListener('selectionchange', read);
+      window.removeEventListener('scroll', read, true);
+      window.removeEventListener('resize', read);
+    };
+  }, [id, active]);
+  return state;
+}
+
+/** Places its bar just ABOVE the highlighted words (below them when there is no room), centred on them. */
+function SelectionBar({ rect, children }: { rect: DOMRect; children: ReactNode }) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  useLayoutEffect(() => {
+    const b = barRef.current?.getBoundingClientRect();
+    if (!b) return;
+    let top = rect.top - b.height - 8;
+    if (top < 8) top = rect.bottom + 8;
+    const left = Math.max(8, Math.min(rect.left + rect.width / 2 - b.width / 2, window.innerWidth - b.width - 8));
+    setPos({ top, left });
+  }, [rect.top, rect.left, rect.width, rect.bottom]);
+  return createPortal(
+    <div ref={barRef} style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999 }} className="z-[9999]">{children}</div>,
+    document.body,
+  );
+}
+
+/** Text inside a PREDEFINED widget — a Data or Action card, or the banner — gets NO outline toolbar
+ *  (Zeni, 6 Oct 2026): its words can be edited and formatted through the bar on highlighted words, and
+ *  nothing else; the card's own layout decides where they sit. */
+function isPredefinedText(id: string): boolean {
+  const owner = id.replace(/~.*$/, '').replace(/-(title|subtitle|sub|label|viewall|caption)$/, '');
+  if (owner === 'hero' || /^hero-/.test(owner)) return true;
+  if (/^quick-/.test(owner)) return true;
+  const placed = placedType(owner);
+  if (placed) return isPredefinedType(placed);
+  return PORTAL_ELEMENTS.some((e) => e.node === owner && isPredefinedElement(e));
+}
+
+/** Text that is PART of a widget (a card title, the banner heading), outline selected: alignment only. */
+function TextAlignBar({ id }: { id: string }) {
+  const { styles, setStyle } = useCanvas();
+  const { tip, setTip, readTip } = useToolbarTip();
+  const [open, setOpen] = useState(false);
+  const opts: [string, string, ReactNode][] = [
+    ['left', 'Left', <AlignLeft key="l" size={15} />],
+    ['center', 'Centre', <AlignCenter key="c" size={15} />],
+    ['right', 'Right', <AlignRight key="r" size={15} />],
+  ];
+  return (
+    <div data-portal-toolbar className={BAR} onClick={(e) => e.stopPropagation()} onMouseOver={readTip} onMouseMove={readTip} onMouseLeave={() => setTip(null)}>
+      <ToolbarTip tip={tip} />
+      <AlignAxis
+        axis="h"
+        value={String(styles[id]?.align ?? (() => {
+          /* Nothing stored: read what the words ACTUALLY do, or a centred heading reports "left". */
+          const el = document.querySelector(`[data-node="${id}"] [data-inline-edit]`) ?? document.querySelector(`[data-node="${id}"]`);
+          const ta = el ? getComputedStyle(el).textAlign : '';
+          return ta === 'center' ? 'center' : ta === 'right' || ta === 'end' ? 'right' : 'left';
+        })())}
+        options={opts}
+        open={open}
+        onToggle={() => setOpen((o) => !o)}
+        onPick={(v) => setStyle(id, { align: v as never })}
+      />
+    </div>
+  );
+}
+
+/* The size list the composer uses (Zeni, 6 Oct 2026). "Default" = the size the text style gives. */
+const TEXT_SIZES = [8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 48, 72];
+/* Paragraph + three heading levels, each shown in the size it produces. */
+const TEXT_STYLE_MENU: [string, string, string][] = [
+  ['PAR', 'Paragraph', 'text-[13px]'],
+  ['H1', 'Heading 1', 'text-[18px] font-semibold'],
+  ['H2', 'Heading 2', 'text-[16px] font-semibold'],
+  ['H3', 'Heading 3', 'text-[14px] font-semibold'],
+];
+/** A thin divider between groups on the text bar (not a `tb-rule`, which the toolbar CSS hides). */
+const TextSep = () => <span className="mx-1 h-4 w-px flex-shrink-0 bg-[#E5E7EB]" aria-hidden />;
+
+function TextToolbar({ id, editing = false, scope = 'full' }: { id: string; editing?: boolean; scope?: 'partial' | 'full' }) {
+  const full = scope === 'full';
   const { tip, setTip, readTip } = useToolbarTip();
   const { styles, setStyle, setText } = useCanvas();
   const [pop, setPop] = useState<'link' | 'ph' | null>(null);
+  /* One dropdown open at a time: text style, font, size or alignment. */
+  const [menu, setMenu] = useState<'style' | 'font' | 'size' | 'align' | null>(null);
   /* The trigger's rect, captured on click — a fixed popover has to be told where its button is. */
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const linkRef = useRef<HTMLButtonElement>(null);
@@ -2724,18 +3102,37 @@ function TextToolbar({ id, editing = false }: { id: string; editing?: boolean })
   const hiliteRef = useRef<HTMLButtonElement>(null);
   const s: NodeStyle = styles[id] ?? {};
   const tBtn = (on?: boolean) => (on ? btnOn : btn);
-  const sel = 'h-7 cursor-pointer rounded border border-[#E5E7EB] bg-white px-1.5 text-[12px] text-[#364658] outline-none hover:border-[#3D8BD0]';
   const setWhole = (patch: Record<string, unknown>) => setStyle(id, patch as never);
   const colorP = colorPair(s as Record<string, unknown>, 'color', '#364658', setWhole);
   const hiliteP = colorPair(s as Record<string, unknown>, 'textBg', '#FDE68A', setWhole);
   const color = shownOf(colorP);
   /* ⚠️ No Light / Dark tabs while WORDS are selected: those colours become inline markup inside the
-     text, and markup has no dark half — offering the tab would promise a second value nothing could
-     store. Colouring the whole text goes to the style store, which has both. */
+     text, and markup has no dark half. Colouring the whole text goes to the style store, which has both. */
   const wordsSelected = editing && hasInlineSelection(id);
-  /* ⚠️ Selected words win: while you are editing with words selected, a control formats THOSE words;
-     otherwise it formats the whole text, as it always has. */
+  /* Selected words win: a control formats THOSE words; otherwise it formats the whole text. */
   const inline = (run: (host: HTMLElement) => void, whole: () => void) => { if (!(editing && applyInline(id, run))) whole(); };
+
+  /* ── dropdown chrome, the composer's: a compact trigger with a chevron, a white list ABOVE the bar ── */
+  const trigger = (on: boolean, open: boolean) =>
+    `flex h-7 items-center gap-1 rounded px-1.5 transition-colors ${on ? 'bg-[#EAF2FB] text-[#3D8BD0]' : open ? 'bg-[#F3F4F6] text-[#364658]' : 'text-[#364658] hover:bg-[#F3F4F6]'}`;
+  const chev = (on: boolean) => <ChevronDown size={12} className={on ? 'text-[#3D8BD0]' : 'text-[#7B8FA5]'} />;
+  /* A list opens ABOVE the bar (the bar already sits above the words) unless there is no room there — then below. */
+  const [menuUp, setMenuUp] = useState(true);
+  const listCls = `absolute left-0 z-[61] rounded-lg border border-[#DFE5ED] bg-white py-1 shadow-lg ${menuUp ? 'bottom-full mb-1.5' : 'top-full mt-1.5'}`;
+  const itemCls = (on: boolean) => `flex w-full items-center gap-2 px-3 py-1.5 text-left text-[13px] text-[#364658] transition-colors ${on ? 'bg-[#F1F5F9] font-medium' : 'hover:bg-[#F9FAFB]'}`;
+  const toggle = (m: 'style' | 'font' | 'size' | 'align', e?: React.MouseEvent) => {
+    if (e) setMenuUp((e.currentTarget as HTMLElement).getBoundingClientRect().top > 310);
+    setMenu((cur) => (cur === m ? null : m));
+  };
+  /* Esc closes an open dropdown first (and only that — the selection and the edit stay). */
+  useEffect(() => {
+    if (!menu) return;
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); e.preventDefault(); setMenu(null); } };
+    window.addEventListener('keydown', k, true);
+    return () => window.removeEventListener('keydown', k, true);
+  }, [menu]);
+  const curStyle = s.heading ?? 'PAR';
+  const curFont = PORTAL_FONTS.find((f) => f.id === s.font);
 
   return (
     <div
@@ -2748,61 +3145,122 @@ function TextToolbar({ id, editing = false }: { id: string; editing?: boolean })
       data-portal-toolbar
       className={BAR}
     >
-      <ToolbarTip tip={tip} />
-      <span {...drag} className="flex size-7 cursor-grab items-center justify-center text-[var(--bar-ink,#9CA3AF)] opacity-70 active:cursor-grabbing"><GripVertical size={14} /></span>
-      <Rule />
+      {!menu && <ToolbarTip tip={tip} />}
+      {menu && <span className="fixed inset-0 z-[60]" onClick={() => setMenu(null)} />}
 
+      {/* ── Text style (whole text only) ── */}
+      {full && (
+        <>
+          <div className="relative z-[61]">
+            <button className={trigger(curStyle !== 'PAR', menu === 'style')} data-tip="Text style" onClick={(e) => toggle('style', e)}>
+              <span className="flex items-end gap-[2px]">
+                <span className="text-[13px] font-semibold leading-none">A</span>
+                <Pencil size={9} className={curStyle !== 'PAR' ? 'text-[#3D8BD0]' : 'text-[#7B8FA5]'} />
+              </span>
+              {chev(curStyle !== 'PAR')}
+            </button>
+            {menu === 'style' && (
+              <div className={`${listCls} w-[160px]`}>
+                {TEXT_STYLE_MENU.map(([v, label, cls]) => (
+                  <button key={v} className={itemCls(curStyle === v)} onClick={() => { setStyle(id, { heading: v, fontSize: undefined }); setMenu(null); }}>
+                    <span className={cls}>{label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <TextSep />
+        </>
+      )}
+
+      {/* ── Bold · Italic · Underline ── */}
       <button className={tBtn(s.bold)} data-tip="Bold" onClick={() => inline(() => document.execCommand('bold'), () => setStyle(id, { bold: !s.bold }))}><Bold size={14} /></button>
       <button className={tBtn(s.italic)} data-tip="Italic" onClick={() => inline(() => document.execCommand('italic'), () => setStyle(id, { italic: !s.italic }))}><Italic size={14} /></button>
       <button className={tBtn(s.underline)} data-tip="Underline" onClick={() => inline(() => document.execCommand('underline'), () => setStyle(id, { underline: !s.underline }))}><Underline size={14} /></button>
 
-      <Rule />
+      <TextSep />
 
-      {/* Theme style. The * is Duda's override marker — it means this text no longer follows the
-          theme, which is the one thing that makes a theme panel trustworthy. */}
-      <select
-        value={s.heading ?? 'PAR'}
-        onChange={(e) => setStyle(id, { heading: e.target.value, fontSize: undefined })}
-        className={sel}
+      {/* ── Font · Size ── */}
+      <div className="relative z-[61]">
+        <button className={`${trigger(!!curFont, menu === 'font')} max-w-[120px]`} data-tip="Font" onClick={(e) => toggle('font', e)}>
+          <span className="truncate text-[12px] font-medium" style={curFont ? { fontFamily: curFont.css } : undefined}>{curFont?.name ?? 'Default'}</span>
+          {chev(!!curFont)}
+        </button>
+        {menu === 'font' && (
+          <div className={`${listCls} w-[180px]`}>
+            <button className={itemCls(!curFont)} onClick={() => { inline((h) => wrapInline(h, 'fontFamily', 'inherit'), () => setStyle(id, { font: undefined })); setMenu(null); }}>Default</button>
+            {/* Each family is shown IN its own face — you choose a font by looking, not by its name. */}
+            {PORTAL_FONTS.map((f) => (
+              <button key={f.id} className={itemCls(s.font === f.id)} style={{ fontFamily: f.css }}
+                onClick={() => { inline((h) => wrapInline(h, 'fontFamily', f.css), () => setStyle(id, { font: f.id })); setMenu(null); }}>
+                {f.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="relative z-[61]">
+        <button className={trigger(!!s.fontSize, menu === 'size')} data-tip="Font size" onClick={(e) => toggle('size', e)}>
+          <span className="text-[11px] font-semibold leading-none tracking-tight">AA</span>
+          {s.fontSize ? <span className="text-[11px]">{s.fontSize}</span> : null}
+          {chev(!!s.fontSize)}
+        </button>
+        {menu === 'size' && (
+          <div className={`${listCls} max-h-[280px] w-[100px] overflow-y-auto`}>
+            <button className={itemCls(!s.fontSize)} onClick={() => { inline((h) => wrapInline(h, 'fontSize', 'inherit'), () => setStyle(id, { fontSize: undefined })); setMenu(null); }}>Default</button>
+            {TEXT_SIZES.map((n) => (
+              <button key={n} className={itemCls(s.fontSize === n)} onClick={() => { inline((h) => wrapInline(h, 'fontSize', `${n}px`), () => setStyle(id, { fontSize: n })); setMenu(null); }}>{n}</button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ── Alignment (whole text only) — the SAME button + popup every other bar uses ── */}
+      {full && (
+        <>
+          <TextSep />
+          <AlignAxis
+            axis="h"
+            value={String(s.align ?? (() => {
+              const el = document.querySelector(`[data-node="${id}"] [data-inline-edit]`) ?? document.querySelector(`[data-node="${id}"]`);
+              const ta = el ? getComputedStyle(el).textAlign : '';
+              return ta === 'center' ? 'center' : ta === 'right' || ta === 'end' ? 'right' : 'left';
+            })())}
+            options={[
+              ['left', 'Left', <AlignLeft key="l" size={15} />],
+              ['center', 'Centre', <AlignCenter key="c" size={15} />],
+              ['right', 'Right', <AlignRight key="r" size={15} />],
+            ]}
+            open={menu === 'align'}
+            onToggle={() => toggle('align')}
+            onPick={(v) => setStyle(id, { align: v as never })}
+          />
+        </>
+      )}
+
+      <TextSep />
+
+      {/* ── Highlight · Text colour ── */}
+      <button
+        ref={hiliteRef}
+        className={tBtn(!!s.textBg)}
+        data-tip="Highlight colour"
+        onClick={() => setPickHilite(pickHilite ? null : hiliteRef.current!.getBoundingClientRect())}
       >
-        {TEXT_STYLES.map((t) => <option key={t} value={t}>{t}{s.fontSize ? '*' : ''}</option>)}
-      </select>
-
-      {/* ⚠️ A plain FONT-FAMILY picker over the six families in `PORTAL_FONTS`.
-          It used to offer the theme's two ROLES, so a bound text followed the theme when the theme
-          changed. Swapped on request for a direct picker — the trade being that a family chosen here
-          now stays put when the theme changes, which is what a direct picker always means.
-          ⚠️ Each option is rendered IN its own face, which is the whole reason a font picker is a
-          list rather than a text field: you choose by looking, not by recognising a name. That only
-          works because all six are loaded in fonts.css. */}
-      <select
-        value={s.font ?? ''}
-        onChange={(e) => { const fid = e.target.value; const css = PORTAL_FONTS.find((f) => f.id === fid)?.css; inline((h) => css && wrapInline(h, 'fontFamily', css), () => setStyle(id, { font: fid || undefined })); }}
-        className={`${sel} max-w-[136px]`}
-        title="Font"
-      >
-        <option value="">Default</option>
-        {PORTAL_FONTS.map((f) => (
-          <option key={f.id} value={f.id} style={{ fontFamily: f.css }}>{f.name}</option>
-        ))}
-      </select>
-
-      <select
-        value={s.fontSize ?? HEADING_SIZE[s.heading ?? 'PAR']}
-        onChange={(e) => { const n = Number(e.target.value); inline((h) => wrapInline(h, 'fontSize', `${n}px`), () => setStyle(id, { fontSize: n })); }}
-        className={`${sel} w-[52px]`}
-      >
-        {[12, 13, 14, 15, 16, 18, 20, 24, 28, 32, 40, 48].map((n) => <option key={n} value={n}>{n}</option>)}
-      </select>
-
-      <Rule />
-
-      {/* ⚠️ A BUTTON opening the product's picker, not a native `<input type="color">` overlaid at
-          `absolute inset-0`. The UA stylesheet gives that input its own width, which beats the
-          left/right pair of `inset-0` — so it spilled out of its 28px label and sat on top of the
-          alignment buttons beside it. That is why clicking "align left" opened a colour picker.
-          ⚠️ And the glyph is Canva's: an A with a bar UNDER it painted in the colour it will apply.
-          A neutral icon makes you open the control to find out what it is currently set to. */}
+        <span className="flex flex-col items-center gap-[2px] leading-none">
+          <Highlighter size={13} />
+          <span className="h-[3px] w-[14px] rounded-[1px] border border-[#E5E7EB]" style={{ background: s.textBg ?? 'transparent' }} />
+        </span>
+      </button>
+      {pickHilite && (
+        <PortalColorPicker
+          value={s.textBg ?? '#FDE68A'}
+          pair={wordsSelected ? undefined : hiliteP}
+          anchor={pickHilite}
+          onChange={(v) => inline(() => document.execCommand('hiliteColor', false, v), () => setStyle(id, { textBg: v }))}
+          onClose={() => setPickHilite(null)}
+        />
+      )}
       <button
         ref={colorRef}
         className={tBtn()}
@@ -2824,43 +3282,9 @@ function TextToolbar({ id, editing = false }: { id: string; editing?: boolean })
         />
       )}
 
-      {/* ⚠️ HIGHLIGHT, not a second text colour. The glyph is a marker over a filled bar — the same
-          shape every office editor uses — so the two colour buttons are told apart by what they
-          show rather than by their tooltips. The swatch under it is the CURRENT highlight, which is
-          what makes "is anything highlighted?" answerable without clicking. */}
-      <button
-        ref={hiliteRef}
-        className={tBtn(!!s.textBg)}
-        data-tip="Highlight colour"
-        onClick={() => setPickHilite(pickHilite ? null : hiliteRef.current!.getBoundingClientRect())}
-      >
-        <span className="flex flex-col items-center gap-[2px] leading-none">
-          <Highlighter size={13} />
-          <span
-            className="h-[3px] w-[14px] rounded-[1px] border border-[#E5E7EB]"
-            style={{ background: s.textBg ?? 'transparent' }}
-          />
-        </span>
-      </button>
-      {pickHilite && (
-        <PortalColorPicker
-          value={s.textBg ?? '#FDE68A'}
-          pair={wordsSelected ? undefined : hiliteP}
-          anchor={pickHilite}
-          onChange={(v) => inline(() => document.execCommand('hiliteColor', false, v), () => setStyle(id, { textBg: v }))}
-          onClose={() => setPickHilite(null)}
-        />
-      )}
+      <TextSep />
 
-      {([['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]] as const).map(([a, Ic]) => (
-        <button key={a} className={tBtn(s.align === a)} data-tip={`Align ${a}`} onClick={() => setStyle(id, { align: a })}>
-          <Ic size={14} />
-        </button>
-      ))}
-      {/* ⚠️ CLEAR FORMATTING sits with the character toggles it undoes, not at the end of the bar.
-          It is the escape hatch for B / I / U / size / colour, so it belongs where those are — and it
-          DELETES those keys rather than writing new ones, which is what makes the text fall back to
-          the theme instead of to a hard-coded default that would drift from it. */}
+      {/* ── Clear formatting · Link ── */}
       <button
         className={tBtn()}
         data-tip="Clear formatting"
@@ -2869,9 +3293,6 @@ function TextToolbar({ id, editing = false }: { id: string; editing?: boolean })
           toast.success('Formatting cleared');
         })}
       ><RemoveFormatting size={14} /></button>
-
-      <Rule />
-
       <button
         ref={linkRef}
         className={pop === 'link' ? btnOn : btn}
@@ -2879,18 +3300,22 @@ function TextToolbar({ id, editing = false }: { id: string; editing?: boolean })
         onClick={() => { setAnchor(linkRef.current?.getBoundingClientRect() ?? null); setPop(pop === 'link' ? null : 'link'); }}
       ><Link2 size={14} /></button>
       {pop === 'link' && anchor && <LinkPopover anchor={anchor} onClose={() => setPop(null)} />}
-      {/* ⚠️ A LABELLED button, not a glyph. "Placeholder" is the one action here whose result is a
-          token rather than a visible change, so an icon alone would be a guess — and it is the
-          control a support-portal admin reaches for most, because a banner that greets someone by
-          name is much of the reason this text is editable at all. */}
-      <button
-        ref={phRef}
-        className={`flex h-7 items-center gap-1 rounded px-2 text-[12px] font-medium transition-colors ${
-          pop === 'ph' ? 'bg-[#EBF5FF] text-[#3D8BD0]' : 'text-[#64748B] hover:bg-[#F3F4F6] hover:text-[#364658]'
-        }`}
-        onClick={() => { setAnchor(phRef.current?.getBoundingClientRect() ?? null); setPop(pop === 'ph' ? null : 'ph'); }}
-      ><Braces size={14} /> Placeholder</button>
-      {pop === 'ph' && anchor && <PlaceholderPopover anchor={anchor} onPick={(t) => { setText(id, t); setPop(null); }} onClose={() => setPop(null)} />}
+
+      {/* ── Placeholder (whole text only) ── */}
+      {full && (
+        <>
+          <TextSep />
+          <button
+            ref={phRef}
+            className={`flex h-7 items-center gap-1 rounded px-2 text-[12px] font-medium transition-colors ${
+              pop === 'ph' ? 'bg-[#EBF5FF] text-[#3D8BD0]' : 'text-[#64748B] hover:bg-[#F3F4F6] hover:text-[#364658]'
+            }`}
+            data-tip="Insert a placeholder"
+            onClick={() => { setAnchor(phRef.current?.getBoundingClientRect() ?? null); setPop(pop === 'ph' ? null : 'ph'); }}
+          ><Braces size={14} /> Placeholder</button>
+          {pop === 'ph' && anchor && <PlaceholderPopover anchor={anchor} onPick={(t) => { setText(id, t); setPop(null); }} onClose={() => setPop(null)} />}
+        </>
+      )}
     </div>
   );
 }
@@ -3067,6 +3492,52 @@ const BANNER_CORNERS: { r: number; label: string; glyph: number }[] = [
   { r: 28, label: 'Round', glyph: 10 },
 ];
 
+/* The banner's Border + Corners rows — one component for its toolbar Style popup AND its sidebar Style
+   group. The banner keeps its OWN keys (`bannerBorder*`, `bannerRadius`): it paints them on the band. */
+function BannerEdgeRows({ hero, set }: { hero: Record<string, unknown>; set: (p: Record<string, unknown>) => void }) {
+  const ref = useRef<HTMLButtonElement>(null);
+  const [at, setAt] = useState<DOMRect | null>(null);
+  const w = Number(hero.bannerBorderWidth ?? 0);
+  const r = Number(hero.bannerRadius ?? 0);
+  const pair = colorPair(hero, 'bannerBorderColor', '#E5E7EB', set);
+  const color = shownOf(pair);
+  return (
+    <div className="-mx-3 mt-3 border-t border-[#EEF1F5] px-3 pt-3">
+      <div className="flex h-8 items-center gap-2.5">
+        <span className="w-[56px] flex-shrink-0 text-[11.5px] font-medium text-[#364658]">Border</span>
+        <MiniRange min={0} max={8} value={w} label="Border weight" onChange={(v) => set({ bannerBorderWidth: v })} />
+        <span className="w-7 flex-shrink-0 text-right text-[11px] tabular-nums text-[#64748B]">{w}px</span>
+        <button
+          ref={ref}
+          aria-label="Border colour"
+          title="Border colour"
+          disabled={w === 0}
+          onClick={() => setAt(at ? null : ref.current!.getBoundingClientRect())}
+          className={`size-[22px] flex-shrink-0 rounded-full border border-black/10 transition-shadow hover:ring-2 hover:ring-[#3D8BD0]/25 disabled:cursor-not-allowed disabled:opacity-40 ${at ? 'ring-2 ring-[#3D8BD0]/40' : ''}`}
+          style={{ background: color }}
+        />
+      </div>
+      <div className="mb-1.5 mt-3 flex items-baseline justify-between">
+        <span className="text-[11.5px] font-medium text-[#364658]">Corners</span>
+        <span className="text-[11px] text-[#9CA3AF]">{BANNER_CORNERS.find((c) => c.r === r)?.label ?? `${r}px`}</span>
+      </div>
+      <div className="pill-track">
+        {BANNER_CORNERS.map((c) => (
+          <button key={c.r} aria-pressed={r === c.r} title={c.label} onClick={() => set({ bannerRadius: c.r })}
+            className="flex flex-1 items-center justify-center rounded py-1 text-[#64748B]">
+            <CornerGlyph r={c.glyph} />
+          </button>
+        ))}
+      </div>
+      {at && (
+        <PortalColorPicker value={color} pair={pair} anchor={at}
+          beside={(ref.current?.closest('[data-portal-popover], [data-banner-style]') as HTMLElement | null)?.getBoundingClientRect()}
+          onChange={(v) => set({ bannerBorderColor: v })} onClose={() => setAt(null)} />
+      )}
+    </div>
+  );
+}
+
 function BannerToolbar() {
   const { cfg, setCfg, deleteNode, heroTree, setBannerSections } = useCanvas();
   const hero = cfg?.('hero') ?? {};
@@ -3113,13 +3584,6 @@ function BannerToolbar() {
   });
   const fileRef = useRef<HTMLInputElement>(null);
   const stylePopRef = useRef<HTMLDivElement>(null);
-  const edgeRef = useRef<HTMLButtonElement>(null);
-  const [edgeAt, setEdgeAt] = useState<DOMRect | null>(null);
-  const edgeW = Number(hero.bannerBorderWidth ?? 0);
-  const edgeR = Number(hero.bannerRadius ?? 0);
-  const edgePair = colorPair(hero as Record<string, unknown>, 'bannerBorderColor', '#E5E7EB', (p) => setCfg?.('hero', p));
-  const edgeColor = shownOf(edgePair);
-  useEffect(() => { if (!bg) setEdgeAt(null); }, [bg]);
   const { tip, setTip, readTip } = useToolbarTip();
   const alignH = String(hero.contentAlign ?? 'center');
   const h = alignH.includes('left') ? 'left' : alignH.includes('right') ? 'right' : 'center';
@@ -3211,7 +3675,7 @@ function BannerToolbar() {
         {bg && (
           <>
             <span className="fixed inset-0 z-[60]" onClick={() => setBg(false)} />
-            <div ref={stylePopRef} className="absolute left-0 top-[calc(100%+6px)] z-[61] max-h-[min(70vh,560px)] w-[300px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]">
+            <div ref={stylePopRef} data-banner-style className="absolute left-0 top-[calc(100%+6px)] z-[61] max-h-[min(70vh,560px)] w-[300px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]">
               <p className="mb-2 text-[12.5px] font-semibold text-[#1E293B]">Banner style</p>
               <p className="mb-1.5 text-[11.5px] font-medium text-[#364658]">Background</p>
               {/* ⚠️ The pill-on-a-track the product uses for LABELLED tabs, deliberately not the
@@ -3282,49 +3746,8 @@ function BannerToolbar() {
               ) : (
                 <BannerFillEditor dense cfg={hero} setCfg={(patch) => setCfg?.('hero', patch)} />
               )}
-              {/* ── Border + Corners, in the Style popup's own language (the card Style popup's Custom
-                  section): a weight slider with its colour pill on one row, then corners as glyphs. The
-                  banner keeps its OWN keys (`bannerBorder*`, `bannerRadius`) — it paints them on the band. */}
-              <div className="-mx-3 mt-3 border-t border-[#EEF1F5] px-3 pt-3">
-                <div className="flex h-8 items-center gap-2.5">
-                  <span className="w-[56px] flex-shrink-0 text-[11.5px] font-medium text-[#364658]">Border</span>
-                  <MiniRange min={0} max={8} value={edgeW} label="Border weight" onChange={(v) => setCfg?.('hero', { bannerBorderWidth: v })} />
-                  <span className="w-7 flex-shrink-0 text-right text-[11px] tabular-nums text-[#64748B]">{edgeW}px</span>
-                  <button
-                    ref={edgeRef}
-                    aria-label="Border colour"
-                    title="Border colour"
-                    disabled={edgeW === 0}
-                    onClick={() => setEdgeAt(edgeAt ? null : edgeRef.current!.getBoundingClientRect())}
-                    className={`size-[22px] flex-shrink-0 rounded-full border border-black/10 transition-shadow hover:ring-2 hover:ring-[#3D8BD0]/25 disabled:cursor-not-allowed disabled:opacity-40 ${edgeAt ? 'ring-2 ring-[#3D8BD0]/40' : ''}`}
-                    style={{ background: edgeColor }}
-                  />
-                </div>
-                <div className="mb-1.5 mt-3 flex items-baseline justify-between">
-                  <span className="text-[11.5px] font-medium text-[#364658]">Corners</span>
-                  <span className="text-[11px] text-[#9CA3AF]">{BANNER_CORNERS.find((c) => c.r === edgeR)?.label ?? `${edgeR}px`}</span>
-                </div>
-                <div className="pill-track">
-                  {BANNER_CORNERS.map((c) => (
-                    <button key={c.r} aria-pressed={edgeR === c.r} title={c.label}
-                      onClick={() => setCfg?.('hero', { bannerRadius: c.r })}
-                      className="flex flex-1 items-center justify-center rounded py-1 text-[#64748B]">
-                      <CornerGlyph r={c.glyph} />
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <BannerEdgeRows hero={hero} set={(p) => setCfg?.('hero', p)} />
             </div>
-            {edgeAt && (
-              <PortalColorPicker
-                value={edgeColor}
-                pair={edgePair}
-                anchor={edgeAt}
-                beside={stylePopRef.current?.getBoundingClientRect()}
-                onChange={(v) => setCfg?.('hero', { bannerBorderColor: v })}
-                onClose={() => setEdgeAt(null)}
-              />
-            )}
           </>
         )}
       </div>
@@ -3466,7 +3889,7 @@ function GroupToolbar({ id }: { id: string }) {
           draggable
           data-tip="Drag to move this section"
           onDragStart={(e) => { e.stopPropagation(); e.dataTransfer.setData(MOVE_MIME, id); e.dataTransfer.effectAllowed = 'move'; }}
-          className="flex size-7 cursor-grab items-center justify-center rounded text-[#94A3B8] transition-colors hover:bg-[#F3F4F6] hover:text-[#364658] active:cursor-grabbing"
+          className="tb-grip flex size-7 cursor-grab items-center justify-center rounded text-[#94A3B8] transition-colors hover:bg-[#F3F4F6] hover:text-[#364658] active:cursor-grabbing"
         ><GripVertical size={15} /></span>
       )}
       <button className={dir === 'column' ? btnOn : btn} data-tip="Vertical — items stack" aria-pressed={dir === 'column'} onClick={() => setDir('column')}><Rows2 size={15} /></button>
@@ -3501,7 +3924,7 @@ const GAP_PINK = '#FF24BD';
    children, so a band that does not say which box arranges them simply has no strips. */
 export const GAP_BAND_NODES = new Set(['quick', 'favourites', 'services', 'work', 'work-main', 'work-rail', 'records']);
 
-function GapBands({ id, host }: { id: string; host: React.RefObject<HTMLDivElement | null> }) {
+function GapBands({ id, host, forceLit = false }: { id: string; host: React.RefObject<HTMLDivElement | null>; forceLit?: boolean }) {
   const { cfg, setCfg } = useCanvas();
   const c = cfg?.(id) ?? {};
   /* On an ARRANGED banner the bands are the arrangement's, and they edit the Content group's gap. */
@@ -3636,7 +4059,7 @@ function GapBands({ id, host }: { id: string; host: React.RefObject<HTMLDivEleme
   return (
     <>
       {bands.map((b, i) => {
-        const lit = drag || hot === i;
+        const lit = forceLit || drag || hot === i;
         const dir = b.dir;
         /* A zero gap still needs something to grab — the hit area never shrinks below 8px. */
         const hitW = dir === 'row' ? Math.max(b.w, 8) : b.w;
@@ -3810,7 +4233,7 @@ function BannerCropper({ hostRef, onClose }: { hostRef: React.RefObject<HTMLDivE
   );
 }
 
-function ToolbarSlot({ toolbarBelow, children }: { toolbarBelow?: boolean | 'under'; children: ReactNode }) {
+function ToolbarSlot({ toolbarBelow, tourId, children }: { toolbarBelow?: boolean | 'under'; tourId?: string; children: ReactNode }) {
   const anchorRef = useRef<HTMLSpanElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
@@ -3849,7 +4272,12 @@ function ToolbarSlot({ toolbarBelow, children }: { toolbarBelow?: boolean | 'und
       const wantBelow = toolbarBelow === 'under' || above < box.top + GAP;
       /* `true` means JUST INSIDE the element's own top edge — the banner's promise. Above it the bar lands on
          the builder's own top bar, which is not part of the canvas at all. */
-      let top = toolbarBelow === true ? el.top + GAP : wantBelow ? below : above;
+      /* ⚠️ While the builder TOUR is open the banner's bar goes ABOVE the banner (Zeni, 1 Oct 2026): inside
+         the band it sat over the banner's own words, and the tour's spotlight is drawn round the banner
+         plus its bar, which reads as one thing only when the bar is outside it. Falls back to inside
+         when there is no room above. */
+      const touring = !!document.body.dataset.portalTour && above >= box.top + GAP;
+      let top = toolbarBelow === true && !touring ? el.top + GAP : wantBelow && !touring ? below : above;
 
       let left = el.left;
       if (left + b.width > box.right - GAP) left = box.right - GAP - b.width;
@@ -3893,6 +4321,7 @@ function ToolbarSlot({ toolbarBelow, children }: { toolbarBelow?: boolean | 'und
       {createPortal(
         <div
           ref={barRef}
+          data-tour={tourId}
           style={{ position: 'fixed', top: pos?.top ?? -9999, left: pos?.left ?? -9999 }}
           className="z-[9999]"
         >{children}</div>,
@@ -4047,7 +4476,7 @@ export function AddSectionSeam({ afterId }: { afterId: string }) {
             onClick={() => setPicking((p) => !p)}
             className="inline-flex h-7 items-center rounded-full bg-[#3D8BD0] px-3.5 text-[12px] font-medium text-white shadow-sm transition-colors hover:bg-[#2d6ca0]"
           >+ Add Section</button>
-          </TooltipTrigger><TooltipContent><TipKeys label="Add a section" keys={lettersOn() ? chromeKeys('newSection') : []} /></TooltipContent></Tooltip>
+          </TooltipTrigger><TooltipContent><TipKeys label="Add a section" keys={chromeKeys('newSection')} /></TooltipContent></Tooltip>
           <span
             onMouseDown={beginResize}
             data-tip="Drag to stretch the section above"
@@ -4246,6 +4675,7 @@ export function Sel({ id, children, className = '', toolbarBelow = false, surfac
   const editRef = useRef<HTMLDivElement>(null);
   const isOn = selectedId === id;
   useEffect(() => { if (!isOn) setEditing(false); }, [isOn]);
+  const words = useWordSelection(id, isOn && editing);
   /* Clicking anywhere that is not these words, their toolbar or a popover it opened ends the edit. */
   useEffect(() => {
     if (!editing) return;
@@ -4580,7 +5010,7 @@ export function Sel({ id, children, className = '', toolbarBelow = false, surfac
           everything the bar contains. Every action on it (move, duplicate, align, delete) is either
           disabled or a lie over navigation the admin does not own. */}
       {on && enabled && id === 'hero' && !cropping && (
-        <ToolbarSlot toolbarBelow={toolbarBelow}><BannerToolbar /></ToolbarSlot>
+        <ToolbarSlot toolbarBelow={toolbarBelow} tourId="hero-toolbar"><BannerToolbar /></ToolbarSlot>
       )}
       {/* ⚠️ The banner's OWN four adders, on hovering the banner itself — left/right add a column at the
           banner's edge, top/bottom a row. Its items keep theirs, which add beside the item. */}
@@ -4612,11 +5042,17 @@ export function Sel({ id, children, className = '', toolbarBelow = false, surfac
               of you before you had chosen any words to format. A text child has no element to move, so it
               keeps the text toolbar in both modes, formatting the whole line or just the selected words. */}
           {node.kind === 'text' && !isContactChild(id) ? (
-            /^el-[0-9]+$/.test(id) && !editing
-              ? <ElementToolbar id={id} kind={node.kind} name={node.name} />
-              : <TextToolbar id={id} editing={editing} />
+            words.kind !== 'none' ? null
+              : /^el-[0-9]+$/.test(id)
+                ? <ElementToolbar id={id} kind={node.kind} name={node.name} />
+                : isPredefinedText(id) ? null : <TextAlignBar id={id} />
           ) : <ElementToolbar id={id} kind={node.kind} name={node.name} />}
         </ToolbarSlot>
+      )}
+      {on && node.kind === 'text' && !isContactChild(id) && words.kind !== 'none' && words.rect && (
+        <SelectionBar rect={words.rect}>
+          <TextToolbar id={id} editing scope={words.kind} />
+        </SelectionBar>
       )}
 
       {/* ── Inline editing ──────────────────────────────────────────────────────
@@ -4673,4 +5109,361 @@ export function Sel({ id, children, className = '', toolbarBelow = false, surfac
       ) : node.kind === 'text' && !node.rich ? richify(body) : body}
     </div>
   );
+}
+
+/* ══ THE TOOLBAR'S DESIGN CONTROLS, IN THE SIDEBAR ═══════════════════════════════════════════════
+ *
+ * (29 Sep 2026, Zeni's manager.) Every styling and layout control the floating toolbar offers for the
+ * selected node — except drag, move, replace, delete and the "add" actions — is ALSO drawn at the top
+ * of the sidebar's Design section, as ordinary panel groups. Nothing else in the sidebar changed.
+ *
+ * ⚠️ ONE set of rules, not two. Which controls a node gets is decided exactly as `ElementToolbar`,
+ * `BannerToolbar` and `GroupToolbar` decide it (`toolbarCaps`, the button / icon / text exclusions,
+ * the tile-preset types), and every control writes the SAME keys through the SAME context — so the
+ * toolbar and the sidebar are two views of one value and cannot drift. Change a rule in the toolbar,
+ * change it here.
+ * ⚠️ The colour fields are `ColorField`, which opens the SAME `PortalColorPicker` at the same size,
+ * with the Light / Dark pair — so the picker is identical whichever surface you opened it from.
+ * ⚠️ Border is NOT tabs here: Weight, then Style as a dropdown, then Colour, each its own field — and
+ * Corner radius is merged into the same group, since both are "the edge of this box".
+ * ⚠️ Rendered inside the real canvas context by the builder (the sidebar itself sits outside it). */
+
+function SliderField({ label, min, max, value, onChange, unit = 'px', display }: {
+  label: string; min: number; max: number; value: number; onChange: (v: number) => void; unit?: string; display?: string;
+}) {
+  return (
+    <Field label={label}>
+      <div className="flex items-center gap-2">
+        <MiniRange min={min} max={max} value={Math.min(max, value)} label={label} onChange={onChange} />
+        <span className="w-12 text-right text-[12px] tabular-nums text-[#364658]">{display ?? `${value}${unit}`}</span>
+      </div>
+    </Field>
+  );
+}
+
+/** A colour field on a light/dark pair, opening the shared picker. */
+function PairColor({ label, pair }: { label: string; pair: ColorPair }) {
+  return (
+    <Field label={label}>
+      <ColorField value={shownOf(pair)} onChange={(v) => pair.onChange(portalColorMode(), v)} modes={{ ...pair, mode: portalColorMode() }} />
+    </Field>
+  );
+}
+
+/** Border weight · style (dropdown) · colour, then corner radius — the toolbar's Border + Corner radius popups, merged. */
+function EdgeFields({ own, keys, write, radiusMax = 32, radiusRest = 8 }: {
+  own: Record<string, unknown>;
+  keys: { width: string; style: string; color: string; radius: string };
+  write: (patch: Record<string, unknown>) => void;
+  radiusMax?: number;
+  radiusRest?: number;
+}) {
+  const width = Number(own[keys.width] ?? 0);
+  const style = String(own[keys.style] ?? 'solid');
+  const radius = Number(own[keys.radius] ?? radiusRest);
+  return (
+    <>
+      <SliderField label="Border weight" min={0} max={8} value={width} onChange={(v) => write({ [keys.width]: v })} />
+      {/* Style and colour only once there IS a border — the toolbar's §2.2 rule: a dashed-vs-dotted
+          choice over an edge that is not drawn is a control describing nothing. */}
+      {width > 0 && (
+        <>
+          <Field label="Border style">
+            <SelectField value={style} options={BORDER_STYLES.map((s) => ({ value: s.value, label: s.label }))} onChange={(v) => write({ [keys.style]: v })} />
+          </Field>
+          <PairColor label="Border colour" pair={colorPair(own, keys.color, '#E5E7EB', write)} />
+        </>
+      )}
+      <SliderField label="Corner radius" min={0} max={radiusMax} value={radius} onChange={(v) => write({ [keys.radius]: v })} />
+    </>
+  );
+}
+
+/** The four shadow presets as cards — the toolbar's Shadow popup, laid out across the panel. */
+function ShadowCards({ id }: { id: string }) {
+  const { styles, setStyle } = useCanvas();
+  const own = styles[id] ?? {};
+  const current = own.shadowOn !== true ? 'none' : SHADOW_PRESETS.find((s) => s.color === String(own.shadowColor ?? ''))?.key ?? 'custom';
+  return (
+    <div className="grid grid-cols-4 gap-2">
+      {SHADOW_PRESETS.map((s) => (
+        <button
+          key={s.key}
+          onClick={() => setStyle(id, s.color === null ? { shadowOn: false } : { shadowOn: true, shadowColor: s.color, shadowType: 'outer', shadowPos: 'bottom' })}
+          className="flex min-w-0 flex-col items-center gap-1"
+        >
+          <span className={`flex h-[44px] w-full items-center justify-center rounded border-2 bg-[#F4F6FA] ${current === s.key ? 'border-[#3D8BD0]' : 'border-transparent hover:border-[#DFE5ED]'}`}>
+            <span className="h-[20px] w-[30px] rounded-[3px] border border-[#E5E7EB] bg-white" style={s.color ? { boxShadow: `0 3px 8px 0 ${s.color}` } : undefined} />
+          </span>
+          <span className={`truncate text-[11px] ${current === s.key ? 'font-medium text-[#3D8BD0]' : 'text-[#64748B]'}`}>{s.label}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+const ALIGN_H_OPTS = [
+  { value: 'left', icon: <AlignStartVertical size={15} />, title: 'Left' },
+  { value: 'center', icon: <AlignCenterVertical size={15} />, title: 'Centre' },
+  { value: 'right', icon: <AlignEndVertical size={15} />, title: 'Right' },
+  { value: 'stretch', icon: <StretchHorizontal size={15} />, title: 'Stretch' },
+];
+const ALIGN_V_OPTS = [
+  { value: 'start', icon: <AlignStartHorizontal size={15} />, title: 'Top' },
+  { value: 'center', icon: <AlignCenterHorizontal size={15} />, title: 'Middle' },
+  { value: 'end', icon: <AlignEndHorizontal size={15} />, title: 'Bottom' },
+  { value: 'stretch', icon: <StretchVertical size={15} />, title: 'Stretch' },
+];
+
+/* ⚠️ Two PARTS, so the drawer can put the layout questions ABOVE Background (Zeni, 29 Sep 2026):
+   'lead' = how the block is arranged (the banner's Sections & arrangement, a card row's Presets, a banner
+   group's Layout); 'look' = everything else (Background, Border & corners, Shadow, Icon, Alignment…).
+   Omitted, both draw — the order they always had. */
+const LEAD_GROUPS = new Set(['sections', 'presets', 'layout', 'align']);
+export function DesignQuickSections({ id, part }: { id: string; part?: 'lead' | 'look' }) {
+  const ctx = useCanvas();
+  const { styles, setStyle, cfg, setCfg, heroTree, setBannerSections } = ctx;
+  /* ⚠️ Open state is the DRAWER's, through `DesignGroupsCtx` — so Expand all / Collapse all on the
+     Design heading reaches these groups like any other. Every group drawn is REPORTED back after the
+     render, which is what that button counts. The local fallback only applies outside a drawer. */
+  const dg = useContext(DesignGroupsCtx);
+  const [shut, setShut] = useState<string[]>([]);
+  const drawn = useRef<string[]>([]);
+  drawn.current = [];
+  useEffect(() => { dg?.report(part ?? 'all', drawn.current.map((k) => `q:${k}`)); });
+  const g = (key: string, title: string, children: ReactNode) => {
+    if (part && (part === 'lead') !== LEAD_GROUPS.has(key)) return null;
+    drawn.current.push(key);
+    const open = dg ? dg.isOpen(`q:${key}`) : !shut.includes(key);
+    const toggle = () => (dg ? dg.toggle(`q:${key}`) : setShut((s) => (s.includes(key) ? s.filter((x) => x !== key) : [...s, key])));
+    return (
+      <Group key={key} title={title} open={open} onToggle={toggle}>
+        {children}
+      </Group>
+    );
+  };
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [bgTab, setBgTab] = useState<'image' | 'color' | null>(null);
+  const colInfo = useColumnAlign(isSectionBox(id) ? id : null);
+
+  const node = nodeById(id);
+  if (!node || id === 'rail' || /^header/.test(id)) return null;
+
+  /* ── The BANNER: BannerToolbar's controls ── */
+  if (id === 'hero') {
+    const hero = (cfg?.('hero') ?? {}) as Record<string, unknown>;
+    const set = (patch: Record<string, unknown>) => setCfg?.('hero', patch);
+    const tab = bgTab ?? (hero.bgKind === 'color' ? 'color' : 'image');
+    const onFile = (file: File | undefined) => {
+      if (!file) return;
+      if (!/^image\//.test(file.type)) { toast.error('Choose an image file — PNG, JPG, SVG or WebP'); return; }
+      if (file.size > 5 * 1024 * 1024) { toast.error('That image is over 5 MB — choose a smaller one'); return; }
+      const r = new FileReader();
+      r.onload = () => { set({ bgKind: 'image', bannerImage: String(r.result), overlayOn: hero.overlayOn ?? true }); toast.success('Banner image added'); };
+      r.readAsDataURL(file);
+    };
+    const h = String(hero.contentAlign ?? 'center');
+    return (
+      <>
+        {g('style', 'Style', (
+          <>
+            <p className="mb-1.5 text-[11.5px] font-medium text-[#364658]">Background</p>
+            <Segmented value={tab} options={[{ value: 'image', label: 'Image' }, { value: 'color', label: 'Colour' }]} onChange={(v) => setBgTab(v as 'image' | 'color')} />
+            <div className="mt-3">
+              {tab === 'image' ? (
+                <>
+                  {hero.bannerImage ? (
+                    <div>
+                      <span className="block h-[88px] w-full rounded border border-[#E5E7EB] bg-[#F8FAFC] bg-cover bg-center" style={{ backgroundImage: `url(${String(hero.bannerImage)})` }} />
+                      <div className="mt-2 flex gap-2">
+                        <button className="h-8 flex-1 rounded border border-[#DFE5ED] text-[12px] font-medium text-[#364658] transition-colors hover:bg-[#F5F7FA]" onClick={() => fileRef.current?.click()}>Replace image</button>
+                        <button className="flex size-8 items-center justify-center rounded border border-[#DFE5ED] text-[#EF4444] transition-colors hover:bg-[#FEF3F2]" title="Remove the image" onClick={() => { set({ bannerImage: '' }); toast.success('Banner image removed'); }}><Trash2 size={14} /></button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button className="flex h-[88px] w-full flex-col items-center justify-center gap-1 rounded border border-dashed border-[#CBD5E1] bg-[#F8FAFC] text-[12px] text-[#7B8FA5] transition-colors hover:border-[#3D8BD0] hover:text-[#3D8BD0]" onClick={() => fileRef.current?.click()}>
+                      <ImagePlus size={18} /> Choose a picture<span className="text-[11px] text-[#9CA3AF]">1600 × 400 works well</span>
+                    </button>
+                  )}
+                  {!!hero.bannerImage && (
+                    <div className="mt-3">
+                      <ToggleRow label="Colour layer over image" on={hero.overlayOn !== false} onChange={(v) => set({ overlayOn: v })} />
+                      {hero.overlayOn !== false && <div className="mt-3"><OverlayLayerEditor cfg={hero} setCfg={set} /></div>}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <BannerFillEditor cfg={hero} setCfg={set} />
+              )}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
+            <BannerEdgeRows hero={hero} set={set} />
+          </>
+        ))}
+        {g('align', 'Alignment', (
+          <>
+            <Field label="Horizontal">
+              <Segmented value={h.includes('left') ? 'left' : h.includes('right') ? 'right' : 'center'} options={ALIGN_H_OPTS.slice(0, 3)} onChange={(v) => set({ contentAlign: v })} />
+            </Field>
+            <Field label="Vertical">
+              <Segmented value={String(hero.contentAlignY ?? 'center')} options={ALIGN_V_OPTS.slice(0, 3)} onChange={(v) => set({ contentAlignY: v })} />
+            </Field>
+          </>
+        ))}
+        {g('sections', 'Sections & arrangement', (
+          <BannerLayoutPanel
+            tree={heroTree?.() ?? null}
+            onCount={(n, remove) => setBannerSections?.(n, remove)}
+            nameOf={(x) => nodeById(x)?.name ?? 'Section'}
+            onClose={() => {}}
+            onPick={(t) => set({ bannerTree: t })}
+          />
+        ))}
+      </>
+    );
+  }
+
+  /* ── A banner GROUP (Text & Search, Text): GroupToolbar's controls ── */
+  if (BANNER_GROUPS.has(id)) {
+    const c = (cfg?.(id) ?? {}) as Record<string, unknown>;
+    const dir = String(c.dir ?? 'column');
+    const hero = (cfg?.('hero') ?? {}) as Record<string, unknown>;
+    const bandA = String(hero.contentAlign ?? 'center');
+    const align = String(c.align ?? (bandA.includes('left') ? 'start' : bandA.includes('right') ? 'end' : 'center'));
+    const textSection = id === 'hero-content';
+    const across = [
+      { value: 'start', icon: <AlignStartVertical size={15} />, title: 'Left' },
+      { value: 'center', icon: <AlignCenterVertical size={15} />, title: 'Centre' },
+      { value: 'end', icon: <AlignEndVertical size={15} />, title: 'Right' },
+    ];
+    const down = [
+      { value: 'start', icon: <AlignStartHorizontal size={15} />, title: 'Top' },
+      { value: 'center', icon: <AlignCenterHorizontal size={15} />, title: 'Middle' },
+      { value: 'end', icon: <AlignEndHorizontal size={15} />, title: 'Bottom' },
+    ];
+    return g('layout', 'Layout', (
+      <>
+        <Field label="Direction">
+          <Segmented value={dir} options={[{ value: 'column', label: 'Stacked', icon: <Rows2 size={14} /> }, { value: 'row', label: 'Side by side', icon: <Columns2 size={14} /> }]} onChange={(v) => setCfg?.(id, { dir: v })} />
+        </Field>
+        {textSection ? (
+          <>
+            <Field label="Horizontal">
+              <Segmented value={String(c.align ?? align)} options={[...across, { value: 'stretch', icon: <StretchHorizontal size={15} />, title: dir === 'row' ? 'Spread to both edges' : 'Stretch across' }]} onChange={(v) => setCfg?.(id, { align: v })} />
+            </Field>
+            <Field label="Vertical">
+              <Segmented value={String(c.alignY ?? hero.contentAlignY ?? 'center')} options={[...down, { value: 'stretch', icon: <StretchVertical size={15} />, title: 'Stretch — words top, search bottom' }]} onChange={(v) => setCfg?.(id, { alignY: v })} />
+            </Field>
+          </>
+        ) : (
+          <Field label={dir === 'row' ? 'Vertical' : 'Horizontal'}>
+            <Segmented value={align} options={dir === 'row' ? down : across} onChange={(v) => setCfg?.(id, { align: v })} />
+          </Field>
+        )}
+      </>
+    ));
+  }
+
+  /* ── A TEXT child: its own text toolbar only (Zeni: containers only) ── */
+  const placed = /^el-[0-9]+$/.test(id);
+  if (node.kind === 'text' && !placed && !isContactChild(id)) return null;
+
+  /* ── Everything else: ElementToolbar's rules ── */
+  const kind = node.kind;
+  const kpi = placedType(id) === 'c-records' && cfg?.(id)?.display === 'kpi';
+  const caps = kpi ? { ...toolbarCaps(id), alignH: undefined, alignV: undefined } : toolbarCaps(id);
+  const isButton = placedType(id) === 'b-button';
+  const isIcon = /-icon$/.test(id);
+  const isActionCard = placedType(id) === 'x-action-card' || /^quick-[a-z]+$/.test(id);
+  const iconTarget = isIcon || /-tile$/.test(id) ? id : isActionCard ? `${id}-icon` : null;
+  const boxLook = (kind !== 'text' || placed) && !isButton && !isIcon;
+  const viaCfg = fillsFromConfig(id);
+  const own = ((viaCfg ? cfg?.(id) : styles[id]) ?? {}) as Record<string, unknown>;
+  const write = (patch: Record<string, unknown>) => (viaCfg ? setCfg?.(id, patch) : setStyle(id, patch as never));
+  const filled = viaCfg ? own.fill === 'color' : own.bgFill === 'color';
+  const tiles = placedType(id) === 'x-actions' || placedType(id) === 'x-kpis' || /^hero-gp-/.test(id);
+
+  const sections: ReactNode[] = [];
+  /* ⚠️ ONE Style group — the toolbar's Style popup drawn inline (`StyleMenu panel`), where the original
+     editor mirrored three separate groups (Background · Border & corners · Shadow). Same component, same
+     keys, so the sidebar and the toolbar are two views of one value. */
+  if (kind !== 'text' || placed) sections.push(g('style', 'Style', <StyleMenu id={id} boxOk={boxLook} panel />));
+  void filled; void write;
+  if (iconTarget) {
+    const io = (styles[iconTarget] ?? {}) as Record<string, unknown>;
+    const card = /^(.+)-icon$/.exec(iconTarget)?.[1];
+    const cardStyle = (card ? styles[card] ?? {} : {}) as Record<string, unknown>;
+    const service = /^(favourites|services)-tile$/.test(iconTarget);
+    const rest = card
+      ? { color: String(cardStyle.iconColor ?? '#475467'), bg: String(cardStyle.iconFill ?? '#F1F5F9'), radius: cardStyle.iconShape === 'circle' ? 999 : 4 }
+      : service ? { color: '#475467', bg: '#FFFFFF', radius: 8 } : { color: '#5A6B80', bg: '#FFFFFF', radius: 6 };
+    const setI = (patch: Record<string, unknown>) => setStyle(iconTarget, patch as never);
+    const r = Number(io.iconRadius ?? rest.radius);
+    const bw = Number(io.iconBorderWidth ?? 0);
+    sections.push(g('icon', 'Icon', (
+      <>
+        <PairColor label="Icon colour" pair={colorPair(io, 'iconColor', rest.color, setI)} />
+        <PairColor label="Icon background" pair={colorPair(io, 'iconFill', rest.bg, setI)} />
+        <SliderField label="Corner radius" min={0} max={24} value={Math.min(24, r)} display={r > 24 ? 'Round' : `${r}px`} onChange={(v) => setI({ iconRadius: v })} />
+        <SliderField label="Border weight" min={0} max={6} value={bw} onChange={(v) => setI({ iconBorderWidth: v })} />
+        {bw > 0 && (
+          <>
+            <Field label="Border style">
+              <SelectField value={String(io.iconBorderStyle ?? 'solid')} options={BORDER_STYLES.map((s) => ({ value: s.value, label: s.label }))} onChange={(v) => setI({ iconBorderStyle: v })} />
+            </Field>
+            <PairColor label="Border colour" pair={colorPair(io, 'iconBorderColor', '#E5E7EB', setI)} />
+          </>
+        )}
+      </>
+    )));
+  }
+  if (tiles) {
+    const oc = (cfg?.(id) ?? {}) as Record<string, unknown>;
+    const count = /^hero-gp-/.test(id)
+      ? id.slice(8).split('|').length
+      : Array.isArray(oc.items) ? (oc.items as { hidden?: boolean }[]).filter((it) => !it.hidden).length : Number(oc.__tileCount ?? 4);
+    sections.push(g('presets', 'Presets', (
+      <TilePresetPicker count={count} value={Number(oc.cols ?? Math.min(count, 4))} onChange={(c) => setCfg?.(id, { cols: String(c) })} />
+    )));
+  }
+  /* A data CARD: one axis, the one its template leaves free, and no Stretch (see ElementToolbar). */
+  const alignCard = isAlignCard(id);
+  const cardTpl = alignCard ? cardTemplateOf(id, cfg) : '';
+  const cardAxis = alignCard ? cardAlignAxis(cardTpl) : null;
+  const showH = caps.alignH !== false && cardAxis !== 'v' && (!colInfo || colInfo.h);
+  const showV = caps.alignV !== false && cardAxis !== 'h' && (!colInfo || colInfo.v);
+  if (showH || showV) {
+    sections.push(g('align', 'Alignment', (
+      <>
+        {showH && (
+          <Field label="Horizontal">
+            <Segmented value={String(styles[id]?.align ?? (alignCard ? cardAlignDefault(cardTpl, id) : colInfo ? 'left' : defaultAlignH(id)))} options={alignCard || (colInfo && !colInfo.stretchH) ? ALIGN_H_OPTS.slice(0, 3) : ALIGN_H_OPTS} onChange={(v) => setStyle(id, { align: v as never })} />
+          </Field>
+        )}
+        {showV && (
+          <Field label="Vertical">
+            <Segmented value={String(styles[id]?.alignY ?? (alignCard ? cardAlignDefault(cardTpl, id) : 'start'))} options={alignCard || (colInfo && !colInfo.stretchV) ? ALIGN_V_OPTS.slice(0, 3) : ALIGN_V_OPTS} onChange={(v) => setStyle(id, { alignY: v as never })} />
+          </Field>
+        )}
+      </>
+    )));
+  }
+  /* ⚠️ No Button style section in the SIDEBAR (Zeni, 29 Sep 2026) — the toolbar's Button style menu is
+     where it is chosen; the sidebar opens with the Button group instead. */
+  if (isButton && false) {
+    sections.push(g('button', 'Button style', (
+      <SelectField value={String(cfg?.(id)?.style ?? 'primary')} options={BUTTON_STYLES.map(([v, l]) => ({ value: v, label: l }))} onChange={(v) => setCfg?.(id, { style: v })} />
+    )));
+  }
+  return sections.length ? <>{sections}</> : null;
+}
+
+/** Whether `DesignQuickSections` draws anything for this node — the same early returns, so a panel can
+ *  decide whether its Design heading has something under it without rendering to find out. */
+export function hasDesignQuick(id: string): boolean {
+  /* (Either part may still draw nothing for a given node; the drawer only needs to know whether ANY might.) */
+  const node = nodeById(id);
+  if (!node || id === 'rail' || /^header/.test(id)) return false;
+  if (id === 'hero' || BANNER_GROUPS.has(id)) return true;
+  return !(node.kind === 'text' && !/^el-[0-9]+$/.test(id) && !isContactChild(id));
 }

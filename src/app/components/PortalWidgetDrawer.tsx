@@ -18,6 +18,7 @@ import { createPortal } from 'react-dom';
 import {
   ChevronLeft, ChevronRight, Copy, EyeOff, Layers, List, MoreVertical, PanelLeft, RotateCcw,
   Info, Link2, Rows3, Search as SearchIcon, Square, Table as TableIcon, Trash2, Type as TypeIcon,
+  AlignStartVertical, AlignCenterVertical, AlignEndVertical, AlignStartHorizontal, AlignCenterHorizontal, AlignEndHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import {
@@ -31,8 +32,9 @@ import { ALL_PACKS, IconBoxBlock, packBadge } from './PortalStylePacks';
 import {
   ALIGN_OPTIONS, Badge, ChipEditor, Chips, Field, GridPicker, Group, LogoPair, Note, NumberField, RichText,
   SelectField, Segmented, SliderRow, StepRail, TextField, ToggleRow, UploadZone, VideoSource,
-  MultiSelect,
+  MultiSelect, DesignGroupsCtx,
 } from './PortalControls';
+import type { DesignGroupsApi } from './PortalControls';
 import { PortalItemList } from './PortalItemList';
 import { RecordFilterField } from './PortalRecordFilter';
 import type { RecordFilter } from './portalRecordFilters';
@@ -42,7 +44,7 @@ import { BannerFillEditor, BannerPresetPicker, GapField, GapPair, OverlayLayerEd
 import { SCRATCH_BANNER_ID, bannerTemplate } from './portalBannerTemplates';
 import { BannerMiniPreview } from './PortalBannersPanel';
 import type { BannerNode } from './portalBannerLayout';
-import { bannerGroupGap } from './portalPageModel';
+import { bannerGroupGap, measuredTileCols, presetForCols } from './portalPageModel';
 import { ACROSS_ROW, ACROSS_STACK, DOWN_ROW, DOWN_STACK, SectionPresets } from './PortalSectionLayout';
 import type { PresetId } from './PortalSectionLayout';
 import { BorderRow, RadiusRow, ShadowBlock, SizeRow } from './PortalBoxControls';
@@ -182,25 +184,26 @@ const ALIGN_ICON: Record<string, ReactNode> = {
   stretch: <AlignGlyph kind="stretch" />,
 };
 
+/* ⚠️ The SAME control every other sidebar alignment uses (Zeni, 29 Sep 2026): a full-width row of three
+   separate bordered boxes with lucide's Align… glyphs — `DesignQuickSections`' Alignment group. It used
+   to be a small joined strip of hand-drawn glyphs, so the logo's position read as a different control. */
+const ALIGN_LUCIDE: Record<string, Record<string, ReactNode>> = {
+  x: { left: <AlignStartVertical size={15} />, start: <AlignStartVertical size={15} />, center: <AlignCenterVertical size={15} />, right: <AlignEndVertical size={15} />, end: <AlignEndVertical size={15} /> },
+  y: { top: <AlignStartHorizontal size={15} />, start: <AlignStartHorizontal size={15} />, middle: <AlignCenterHorizontal size={15} />, center: <AlignCenterHorizontal size={15} />, bottom: <AlignEndHorizontal size={15} />, end: <AlignEndHorizontal size={15} /> },
+};
 function AlignRow({ value, options, onChange, axis = 'x' }: {
   value: string; options: { value: string; label: string }[]; onChange: (v: string) => void; axis?: 'x' | 'y';
 }) {
   return (
-    <div className="inline-flex overflow-hidden rounded border border-[#DFE5ED]">
-      {options.map((o, i) => {
-        const on = value === o.value;
-        return (
-          <button
-            key={o.value}
-            onClick={() => onChange(o.value)}
-            title={o.label}
-            className={`flex h-8 w-9 items-center justify-center transition-colors ${
-              i > 0 ? 'border-l border-[#DFE5ED]' : ''
-            } ${on ? 'bg-[#EBF5FF] text-[#3D8BD0]' : 'bg-white text-[#64748B] hover:bg-[#F5F7FA]'}`}
-          ><AlignGlyph kind={ALIGN_KIND[o.value] ?? 'start'} axis={axis} /></button>
-        );
-      })}
-    </div>
+    <Segmented
+      value={value}
+      options={options.map((o) => ({
+        value: o.value,
+        title: o.label,
+        icon: ALIGN_LUCIDE[axis][o.value] ?? <AlignGlyph kind={ALIGN_KIND[o.value] ?? 'start'} axis={axis} />,
+      }))}
+      onChange={onChange}
+    />
   );
 }
 
@@ -381,7 +384,11 @@ const OverrideDot = () => (
   <span title="Something in here is set away from the default" className="size-1.5 flex-shrink-0 rounded-full bg-[#F58518]" />
 );
 
-function PanelBody({ spec, nodeId, cfg, renderField, openGroups, toggleGroup, styles, setStyle, replaceStyle, collectionSlot, hasCollection }: {
+function PanelBody({ spec, nodeId, cfg, renderField, openGroups, toggleGroup, setOpenGroups, quickShut = [], styles, setStyle, replaceStyle, collectionSlot, hasCollection, quickDesign }: {
+  quickDesign?: (part: 'lead' | 'look') => ReactNode;
+  setOpenGroups: (next: string[]) => void;
+  /** The toolbar sections' shut-markers, so Expand all reaches them too. */
+  quickShut?: string[];
   spec: WidgetSpec; nodeId: string; cfg: Cfg;
   renderField: (f: WidgetField) => ReactNode;
   openGroups: string[]; toggleGroup: (g: string) => void;
@@ -417,7 +424,7 @@ function PanelBody({ spec, nodeId, cfg, renderField, openGroups, toggleGroup, st
      eyebrow with nothing beneath it.
      ⚠️ `size` is filtered out of the render, so it is filtered out of the test too — counting it
      would keep the eyebrow for a widget whose only accordion is one the panel never draws. */
-  const hasDesignSection = panel.accordions
+  const hasDesignSection = !!quickDesign || panel.accordions
     .filter((a) => a.id !== 'size')
     .some((a) => !a.when || a.when(cfg));
 
@@ -471,13 +478,30 @@ function PanelBody({ spec, nodeId, cfg, renderField, openGroups, toggleGroup, st
 
       {hasDesignSection && (
       <>
-      <SectionLabel>Design</SectionLabel>
+      <SectionLabel action={(
+        /* ⚠️ This model had no Expand all on Design at all. Its accordions are open unless shut, the
+           same convention as the toolbar's sections, so both go in as shut-markers. */
+        <ExpandAll
+          keys={[]}
+          shutKeys={[
+            ...panel.accordions.filter((a) => a.id !== 'size').filter((a) => !a.when || a.when(cfg))
+              .filter((a) => visible(a.fields).length > 0 || !!a.spacing || a.groups?.some((g) => g !== 'G1'))
+              .map((a) => `shut:${a.id}`),
+            ...(quickDesign ? quickShut : []),
+          ]}
+          openGroups={openGroups}
+          setOpen={setOpenGroups}
+        />
+      )}>Design</SectionLabel>
       <div>
+        {/* ⚠️ ORDER (Zeni, 29 Sep 2026): the LAYOUT accordion and the toolbar's layout controls first,
+            then the toolbar's look controls (Background, Border & corners, Shadow…), then the rest. */}
         {/* ⚠️ `size` is dropped here as well. Size already left as a field group (DROP_GROUPS) and as
             the P2 pack, but the panel model declares it a THIRD way — as an accordion — so it kept
             appearing on exactly the widgets that use that model. The eight drag handles set size;
             a slider that does the same thing is the second control this builder keeps growing. */}
-        {panel.accordions.filter((a) => a.id !== 'size').filter((a) => !a.when || a.when(cfg))
+        {(() => {
+        const list = panel.accordions.filter((a) => a.id !== 'size').filter((a) => !a.when || a.when(cfg))
           /* ⚠️ An accordion with NOTHING IN IT is dropped, not rendered empty. P1 lost its last
              control when Fill, Border and Corner radius moved to the floating toolbar, so every
              spec that names it was left with a "Style" heading that opened onto blank space — a
@@ -485,8 +509,8 @@ function PanelBody({ spec, nodeId, cfg, renderField, openGroups, toggleGroup, st
              for a field: what would actually draw. `spacing` and the icon/type groups still count,
              so only the genuinely empty ones go. */
           .filter((a) => visible(a.fields).length > 0 || !!a.spacing
-            || a.groups?.some((g) => g !== 'G1'))
-          .map((a) => {
+            || a.groups?.some((g) => g !== 'G1'));
+        const accordion = (a: typeof list[number]) => {
           const key = `acc:${a.id}`;
           const open = !openGroups.includes(`shut:${a.id}`);
           return (
@@ -525,7 +549,16 @@ function PanelBody({ spec, nodeId, cfg, renderField, openGroups, toggleGroup, st
             </Group>
             </Fragment>
           );
-        })}
+        };
+        return (
+          <>
+            {list.filter((a) => a.id === 'layout').map(accordion)}
+            {quickDesign?.('lead')}
+            {quickDesign?.('look')}
+            {list.filter((a) => a.id !== 'layout').map(accordion)}
+          </>
+        );
+        })()}
       </div>
       </>
       )}
@@ -550,16 +583,20 @@ const SectionLabel = ({ children, action }: { children: ReactNode; action?: Reac
 );
 
 /** Expand all / Collapse all for one section's accordions. Says which it will do, not which it did. */
-function ExpandAll({ keys, openGroups, setOpen }: {
-  keys: string[]; openGroups: string[]; setOpen: (next: string[]) => void;
+/* ⚠️ Two kinds of key, because the drawer stores two kinds of group: most are OPEN while their key is
+   in the list (`keys`), but the accordion model and the toolbar's sections are open UNLESS a
+   `shut:<key>` marker is there (`shutKeys`, passed as the full marker). One button has to flip both,
+   or Collapse all left every default-open group standing — which is what "it does not work" was. */
+function ExpandAll({ keys, shutKeys = [], openGroups, setOpen }: {
+  keys: string[]; shutKeys?: string[]; openGroups: string[]; setOpen: (next: string[]) => void;
 }) {
-  if (keys.length < 2) return null;
-  const allOpen = keys.every((k) => openGroups.includes(k));
+  if (keys.length + shutKeys.length < 2) return null;
+  const allOpen = keys.every((k) => openGroups.includes(k)) && shutKeys.every((k) => !openGroups.includes(k));
   return (
     <button
       onClick={() => setOpen(allOpen
-        ? openGroups.filter((k) => !keys.includes(k))
-        : [...new Set([...openGroups, ...keys])])}
+        ? [...new Set([...openGroups.filter((k) => !keys.includes(k)), ...shutKeys])]
+        : [...new Set([...openGroups.filter((k) => !shutKeys.includes(k)), ...keys])])}
       className="text-[11px] font-medium normal-case tracking-normal text-[#3D8BD0] hover:underline"
     >{allOpen ? 'Collapse all' : 'Expand all'}</button>
   );
@@ -575,6 +612,11 @@ const NODE_ICON: Record<string, ReactNode> = {
  * far above where they used to be declared — a `const` read before its declaration in the same
  * scope is a temporal dead zone, which in this file arrives as a blank page rather than an error. */
 const DROP_GROUPS = new Set(['Layout', 'Size', 'Arrangement']);
+/* The card's Title placement group — drawn LAST in Design, after Spacing (Zeni, 29 Sep 2026). */
+const TITLE_GROUP = 'Title';
+/* The spec groups that answer "what shape is this block" — drawn FIRST in Design, above Background. */
+/* ⚠️ 'Button' leads too: a Button's Design opens with its own Button group, then Alignment (Zeni, 29 Sep 2026). */
+const LEAD_SPEC_GROUPS = new Set(['Banner', 'Layout', 'Card templates', 'Button']);
 /* The one group that always sinks to the foot of Design. It describes what a widget does when it
    has nothing to show — a rare, conditional state — so it must not sit between the fill and the
    spacing you are actually reading, and it can never be the FIRST accordion. */
@@ -676,6 +718,9 @@ export interface WidgetDrawerProps {
   onApplyBannerShape?: (id: string) => void;
   /** Opens the layout picker for the banner already on the page, locked to its shape. */
   onChangeBanner?: () => void;
+  /* The floating toolbar's design controls for this node (`DesignQuickSections`), built by the
+     builder INSIDE the canvas context and drawn at the top of Design. Null when the node has none. */
+  quickDesign?: (part: 'lead' | 'look') => ReactNode;
 }
 
 /* ⚠️ NO ALIGNMENT IN ANY SIDEBAR (25 Sep 2026). Every block's alignment is on its floating toolbar —
@@ -701,7 +746,7 @@ function withoutAlignment(spec: WidgetSpec): WidgetSpec {
 }
 
 export function PortalWidgetDrawer(props: WidgetDrawerProps) {
-  const { nodeId, spec: specIn, cfg, setCfg, styles, setStyle, replaceStyle, onSelect, onReset, applyPreset, icon, setIcon, onAddLinkCard, onApplyBannerLayout, onApplyBannerShape, onChangeBanner } = props;
+  const { nodeId, spec: specIn, cfg, setCfg, styles, setStyle, replaceStyle, onSelect, onReset, applyPreset, icon, setIcon, onAddLinkCard, onApplyBannerLayout, onApplyBannerShape, onChangeBanner, quickDesign } = props;
   const spec = useMemo(() => withoutAlignment(specIn), [specIn]);
   const node = nodeById(nodeId);
   const path = nodePath(nodeId);
@@ -753,6 +798,15 @@ export function PortalWidgetDrawer(props: WidgetDrawerProps) {
   const setOpenGroups = (next: string[]) => { GROUP_MEMORY[spec.id] = next; setOpenGroupsState(next); };
   const toggleGroup = (g: string) =>
     setOpenGroups(openGroups.includes(g) ? openGroups.filter((x) => x !== g) : [...openGroups, g]);
+  /* The toolbar sections showing right now, as they report themselves — what Expand all counts. */
+  const [quickParts, setQuickParts] = useState<Record<string, string[]>>({});
+  const quickKeys = Object.values(quickParts).flat();
+  const quickShut = quickKeys.map((k) => `shut:${k}`);
+  const designGroups: DesignGroupsApi = {
+    isOpen: (k) => !openGroups.includes(`shut:${k}`),
+    toggle: (k) => toggleGroup(`shut:${k}`),
+    report: (part, keys) => setQuickParts((prev) => ((prev[part] ?? []).join('|') === keys.join('|') ? prev : { ...prev, [part]: keys })),
+  };
 
   if (!node) return null;
 
@@ -1284,10 +1338,10 @@ export function PortalWidgetDrawer(props: WidgetDrawerProps) {
          service tiles one per service, so the lit tile states what the canvas is actually showing. */
       case 'tilePreset': {
         const TILE_COUNT = 4;
-        const own = Number(styles[nodeId]?.columns ?? viewCfg.columns) || 0;
-        const recordTiles = nodeId === 'assets' || nodeId === 'cis';
-        const current: PresetId = own === 1 ? 'stack' : own === 2 ? 'grid' : own === 3 ? 'three'
-          : own >= 4 ? 'cols' : recordTiles ? 'grid' : 'cols';
+        /* ⚠️ Unset, the lit preset is what the canvas is DRAWING (measuredTileCols) — the split service
+           row is 2 × 2 by default, and a guess from config lit "four across" over it. */
+        const own = Number(styles[nodeId]?.columns) || 0;
+        const current: PresetId = presetForCols(own || measuredTileCols(nodeId) || TILE_COUNT);
         return (
           <SectionPresets
             count={TILE_COUNT}
@@ -1676,7 +1730,23 @@ export function PortalWidgetDrawer(props: WidgetDrawerProps) {
     || !!(col && (!col.when || col.when(cfg)))
     || !!(selItem && collection?.isTableRow));
 
+  /* One Design group from the spec, with any pack whose title matches it merged inside. Used twice — the
+     layout groups above Background, the rest below — so both halves render a group the same way. */
+  const renderStyleGroup = ({ group, fields }: { group: string; fields: WidgetField[] }) => {
+    const merged = (viewPacks ?? []).filter((pk) => ALL_PACKS[pk]?.title === group);
+    return (
+      <Group key={group} title={group} open={openGroups.includes(group)} onToggle={() => toggleGroup(group)}>
+        {fields.map(renderField)}
+        {merged.map((pk) => {
+          const P = ALL_PACKS[pk];
+          return <P.Render key={pk} {...packProps} />;
+        })}
+      </Group>
+    );
+  };
+
   return (
+    <DesignGroupsCtx.Provider value={designGroups}>
     <div className="flex h-full flex-col">
       {/* ── header ── */}
       <div className="flex-shrink-0 border-b border-[#F0F2F5] px-4 pb-0 pt-3">
@@ -1754,11 +1824,14 @@ export function PortalWidgetDrawer(props: WidgetDrawerProps) {
             renderField={renderField}
             openGroups={openGroups}
             toggleGroup={toggleGroup}
+            setOpenGroups={setOpenGroups}
+            quickShut={quickShut}
             styles={styles}
             setStyle={setStyle}
             replaceStyle={replaceStyle}
             collectionSlot={collectionBlock}
             hasCollection={!!(col && (!col.when || col.when(cfg)))}
+            quickDesign={quickDesign}
           />
         ) : (
         <>
@@ -1851,27 +1924,23 @@ export function PortalWidgetDrawer(props: WidgetDrawerProps) {
             Gating only the heading left the shared Spacing block floating under Content, which reads
             as a content setting and is the one thing it is not. */}
         {hasDesign && (
-          <SectionLabel action={<ExpandAll keys={[...groupsFor('style').map((g) => g.group), ...(viewPacks ?? []), '__spacing']} openGroups={openGroups} setOpen={setOpenGroups} />}>Design</SectionLabel>
+          <SectionLabel action={<ExpandAll keys={[...groupsFor('style').map((g) => g.group), ...(viewPacks ?? []), '__spacing']} shutKeys={quickDesign ? quickShut : []} openGroups={openGroups} setOpen={setOpenGroups} />}>Design</SectionLabel>
         )}
         {hasDesign && (
           <>
+            {/* ⚠️ ORDER (Zeni, 29 Sep 2026): the LAYOUT questions first — the banner's Banner layout and
+                Sections & arrangement, a card's Layout and Card templates — then Background and the rest
+                of the look. What shape a block is decides everything below it. */}
+            {groupsFor('style').filter(({ group }) => LEAD_SPEC_GROUPS.has(group)).map(renderStyleGroup)}
+            {quickDesign?.('lead')}
+            {quickDesign?.('look')}
             {/* Widget-specific styling first — it is what this widget is, before the generic packs. */}
             {/* ⚠️ A pack whose TITLE matches a spec group is rendered INSIDE that group rather than
                 beside it. Row layout is a content-config field but belongs under Arrangement with
                 the gap and the dividers; without this merge the panel showed two sections both
                 called "Arrangement", which is worse than either placement. */}
-            {groupsFor('style').map(({ group, fields }) => {
-              const merged = (viewPacks ?? []).filter((pk) => ALL_PACKS[pk]?.title === group);
-              return (
-                <Group key={group} title={group} open={openGroups.includes(group)} onToggle={() => toggleGroup(group)}>
-                  {fields.map(renderField)}
-                  {merged.map((pk) => {
-                    const P = ALL_PACKS[pk];
-                    return <P.Render key={pk} {...packProps} />;
-                  })}
-                </Group>
-              );
-            })}
+            {/* ⚠️ TITLE is drawn LAST (after Spacing), not here — Zeni, 29 Sep 2026. */}
+            {groupsFor('style').filter(({ group }) => group !== TITLE_GROUP && !LEAD_SPEC_GROUPS.has(group)).map(renderStyleGroup)}
             {(viewPacks ?? []).map((pk) => {
               const pack = ALL_PACKS[pk];
               // Already drawn inside the spec group that shares its title.
@@ -1912,6 +1981,16 @@ export function PortalWidgetDrawer(props: WidgetDrawerProps) {
                 <ALL_PACKS.P8.Render {...packProps} />
               </Group>
             )}
+            {/* The card's TITLE placement, last of all. */}
+            {groupsFor('style').filter(({ group }) => group === TITLE_GROUP).map(({ group, fields }) => (
+              <Group key={group} title={group} open={openGroups.includes(group)} onToggle={() => toggleGroup(group)}>
+                {fields.map(renderField)}
+                {(viewPacks ?? []).filter((pk) => ALL_PACKS[pk]?.title === group).map((pk) => {
+                  const P = ALL_PACKS[pk];
+                  return <P.Render key={pk} {...packProps} />;
+                })}
+              </Group>
+            ))}
           </>
         )}
         </>
@@ -1919,6 +1998,7 @@ export function PortalWidgetDrawer(props: WidgetDrawerProps) {
       </div>
 
     </div>
+    </DesignGroupsCtx.Provider>
   );
 }
 

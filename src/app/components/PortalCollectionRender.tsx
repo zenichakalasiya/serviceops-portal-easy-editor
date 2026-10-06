@@ -18,7 +18,7 @@ import { ImageUploadZone } from './PortalControls';
 /* The Table is a module of its own — a spreadsheet-grade editor is a different kind of thing from
    the read-only renderers in this file, and it owns its data model, its handles and its menus. */
 import { PortalTable } from './PortalTable';
-import { hasFixedTitle, hasFixedViewAll, itemNodeId, registerItemName, subNodeId } from './portalPageModel';
+import { cardAlignClass, cardAlignCss, hasFixedTitle, hasFixedViewAll, itemNodeId, registerItemName, subNodeId } from './portalPageModel';
 import { CarouselArrows, CarouselDots, CarouselNav, CarouselTrack, useCarousel } from './PortalCarousel';
 import { LineMark } from './PortalLineStyles';
 import type { LineStyle } from './PortalLineStyles';
@@ -1187,18 +1187,6 @@ const FEATURED_SERVICES = [
  * catalogue — at which point the requester is better served by the catalogue page itself. */
 const MAX_SERVICE_TILES = 4;
 
-/* Tile content alignment from the toolbar — undefined keys leave the template's own arrangement. */
-const tileAlign = (s: { align?: string; alignY?: string } | undefined, stacked: boolean): React.CSSProperties => {
-  if (!s || (s.align === undefined && s.alignY === undefined)) return {};
-  const h = s.align === 'left' ? 'flex-start' : s.align === 'right' ? 'flex-end' : s.align === 'stretch' ? 'stretch' : 'center';
-  const v = s.alignY === 'center' ? 'center' : s.alignY === 'end' ? 'flex-end' : 'flex-start';
-  const css: React.CSSProperties = stacked
-    ? { alignItems: s.align !== undefined ? h : undefined, justifyContent: s.alignY !== undefined ? v : undefined }
-    : { justifyContent: s.align !== undefined ? h : undefined, alignItems: s.alignY !== undefined ? v : undefined };
-  if (s.align !== undefined) css.textAlign = s.align === 'right' ? 'right' : s.align === 'left' || s.align === 'stretch' ? 'left' : 'center';
-  return css;
-};
-
 function ServiceTiles({ nodeId, items, showDesc, tpl = 'top', cols, chips, look, gap }: {
   nodeId: string; items: { id: string; name: string; desc: string }[]; showDesc: boolean;
   /* The resolved column count. Undefined means "one per service", which is what this grid always
@@ -1273,12 +1261,15 @@ function ServiceTiles({ nodeId, items, showDesc, tpl = 'top', cols, chips, look,
           key={s.id}
           id={`${nodeId}-tile`}
           /* A lone last tile spans the row — what the Three-across preset tile draws. */
-          style={{ ...((cols ?? 0) > 1 && i === arr.length - 1 && arr.length % (cols ?? 1) === 1 ? { gridColumn: '1 / -1' } : {}), ...tileAlign(styles[nodeId + '-tile'], top) }}
+          style={{ ...((cols ?? 0) > 1 && i === arr.length - 1 && arr.length % (cols ?? 1) === 1 ? { gridColumn: '1 / -1' } : {}), ...cardAlignCss(styles[nodeId + '-tile'], tpl) }}
           /* ⚠️ The light-grey DATA-TILE fill (#F6F9FC), not white: the tiles sit inside a white card now,
              and white on white would leave only a hairline to tell a tile from its card. No shadow for
              the same reason — a tile is a region of the card, not a card lifted off it. A colour the
              admin picks for the tiles still wins (the style store paints over this class). */
-          className={`flex min-w-0 rounded-lg border border-[#E5E7EB] bg-[#F6F9FC] ${
+          /* ⚠️ NO STROKE (29 Sep 2026): the grey fill already separates a tile from the white card, so a
+             hairline around it was a second edge saying the same thing. A border the admin sets from the
+             toolbar still draws — `containerCss` writes its own width and style. */
+          className={`flex min-w-0 rounded-lg bg-[#F6F9FC] ${cardAlignClass(styles[nodeId + '-tile'])} ${
             action ? 'gap-3 px-3.5 py-3' : 'gap-2 px-3 py-4'
           } ${
             top ? 'flex-col items-center text-center' : tpl === 'right' ? 'flex-row-reverse items-center' : 'items-center'
@@ -1295,7 +1286,10 @@ function ServiceTiles({ nodeId, items, showDesc, tpl = 'top', cols, chips, look,
                icon colour the admin picked for these tiles still wins — a theme supplies the
                default, never the answer. An action tile takes the deeper step, a plain one the
                lightest, so the two looks stay a step apart now that both are themed. */
-            <span style={{ backgroundColor: action ? TONE.soft : TONE.wash, color: TONE.ink, ...iconBoxCss(styles, `${nodeId}-tile`) }} className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg">
+            /* ⚠️ WHITE on the plain tile (Zeni, 29 Sep 2026): the tile itself is the light-grey data-tile
+               fill now, so a tinted badge on it was a third shade of the same pale colour; a white badge
+               reads as the icon's own surface. The action look keeps its toned badge. */
+            <span style={{ backgroundColor: '#FFFFFF', color: TONE.ink, ...iconBoxCss(styles, `${nodeId}-tile`) }} className="flex size-9 flex-shrink-0 items-center justify-center rounded-lg">
               <ShoppingCart size={18} strokeWidth={1.7} />
             </span>
           )}

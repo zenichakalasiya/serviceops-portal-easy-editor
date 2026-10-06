@@ -1,9 +1,8 @@
-import { useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { Keyboard, X } from 'lucide-react';
+import { useEffect } from 'react';
+import { openGlobalShortcuts } from './shortcutContext';
 import { useCanvas } from './PortalCanvas';
 import { nodePath } from './portalPageModel';
-import { TOOLBAR_KEYS, chromeKeys, lettersOn, setLettersOn, tipsOf } from './portalShortcutKeys';
+import { TOOLBAR_KEYS, chromeKeys, tipsOf, SHOW_MOVE_ARROWS } from './portalShortcutKeys';
 import type { ChromeAction, ToolbarAction } from './portalShortcutKeys';
 
 /* Support Portal builder — keyboard shortcuts, and the sheet that lists them.
@@ -127,10 +126,8 @@ export function PortalShortcuts(props: PortalShortcutProps) {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      /* `?` is Shift+/ — it works from a field too, because it cannot be typed by accident into one
-         that is expecting words without Shift, and somebody reaching for help is usually stuck. */
-      if (e.key === '?') { e.preventDefault(); onOpenChange(!open); return; }
-      if (open && e.key === 'Escape') { e.preventDefault(); onOpenChange(false); return; }
+      /* ⚠️ `?` belongs to the GLOBAL Keyboard shortcuts panel now (Zeni, 30 Sep 2026) — it opens focused on
+         this builder. The builder has no sheet of its own. */
       if (isTyping(e.target)) return;
 
       /* PREVIEW is the one surface where almost nothing applies — there is no selection and no bar.
@@ -168,10 +165,6 @@ export function PortalShortcuts(props: PortalShortcutProps) {
 
       /* CHROME_KEYS.newSection — N, BEFORE the selection gate. It is the first step of building a
          page, so it has to work on an empty one: with nothing selected it lands at the page's foot. */
-      /* ⚠️ Bare letters (N included) answer only once they are switched on — see `lettersOn`. Shift+A
-         is a letter too; the arrows, Delete, Enter and Esc below are not, and stay on. */
-      if (/^Key[A-Z]$/.test(e.code) && !e.altKey && !lettersOn()) return;
-
       if (e.code === 'KeyN' && !e.altKey && !e.shiftKey) { e.preventDefault(); props.onAddSection(selectedId); return; }
 
       if (!selectedId) return;
@@ -232,7 +225,8 @@ export function PortalShortcuts(props: PortalShortcutProps) {
       const ARROWS: Record<string, ToolbarAction> = {
         ArrowLeft: 'moveLeft', ArrowRight: 'moveRight', ArrowUp: 'moveUp', ArrowDown: 'moveDown',
       };
-      if (ARROWS[e.code]) { if (act(ARROWS[e.code])) e.preventDefault(); return; }
+      /* PARKED — see `SHOW_MOVE_ARROWS`. Off, a bare arrow is left to the browser (it scrolls). */
+      if (SHOW_MOVE_ARROWS && ARROWS[e.code]) { if (act(ARROWS[e.code])) e.preventDefault(); return; }
 
       /* ── Everything else is a letter on the bar ── */
       switch (e.code) {
@@ -245,11 +239,10 @@ export function PortalShortcuts(props: PortalShortcutProps) {
         /* style */
         case 'KeyL': e.preventDefault(); act('style'); break;
         case 'KeyB': e.preventDefault(); act('background'); break;
-        case 'KeyO': e.preventDefault(); act('border'); break;
-        case 'KeyC': e.preventDefault(); act('radius'); break;
+        /* ⚠️ O, C, D and I are gone: Border, Corner radius, Shadow and Icon left the floating toolbar
+           for the sidebar (29 Sep 2026), and these keys only ever pressed the toolbar's own buttons. */
         case 'KeyH': e.preventDefault(); act('alignH'); break;
         case 'KeyV': e.preventDefault(); act('alignV'); break;
-        case 'KeyI': e.preventDefault(); act('icon'); break;
         case 'KeyG': e.preventDefault(); act('presets'); break;
         case 'KeyP': e.preventDefault(); openSpacing(); break;
         /* remove the selection itself — this also closes any popup the bar has open, because the
@@ -262,8 +255,9 @@ export function PortalShortcuts(props: PortalShortcutProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [enabled, selectedId, select, styles, setStyle, open, onOpenChange, props]);
 
-  if (!open) return null;
-  return <Sheet onClose={() => onOpenChange(false)} />;
+  /* The builder's rail Shortcuts button asks for the sheet — it is answered by the GLOBAL panel. */
+  useEffect(() => { if (open) { openGlobalShortcuts(); onOpenChange(false); } }, [open, onOpenChange]);
+  return null;
 }
 
 /* ── The sheet ───────────────────────────────────────────────────────────────────────────────────
@@ -300,7 +294,7 @@ const BUILDER: Group = { title: 'The builder', rows: [
   { keys: combo(ck('widgets')), label: 'Widgets' },
   { keys: combo(ck('theme')), label: 'Theme' },
   { keys: combo(ck('branding')), label: 'Branding' },
-  { keys: combo(ck('banners')), label: 'Banners' },
+  /* Banners is hidden from the rail, so its key has nothing to open — off the sheet too. */
   { keys: combo(ck('hidePanel')), label: 'Hide the design panel' },
 ] };
 
@@ -323,20 +317,19 @@ const SELECT: Group = { title: 'Select', note: 'Alt changes what is selected', r
   { keys: ['Esc'], label: 'Deselect, and close anything open' },
 ] };
 
-const MOVE: Group = { title: 'Move and size', note: 'Only the parent’s own axis answers', rows: [
+const MOVE: Group = SHOW_MOVE_ARROWS ? { title: 'Move and size', note: 'Only the parent’s own axis answers', rows: [
   { keys: [...k('moveLeft'), ...k('moveRight'), ...k('moveUp'), ...k('moveDown')], label: 'Move one place' },
+  { keys: ['Shift', '+', '←', '/', '→'], label: 'Narrower / wider' },
+  { keys: ['Shift', '+', '↑', '/', '↓'], label: 'Shorter / taller' },
+] } : { title: 'Size', rows: [
   { keys: ['Shift', '+', '←', '/', '→'], label: 'Narrower / wider' },
   { keys: ['Shift', '+', '↑', '/', '↓'], label: 'Shorter / taller' },
 ] };
 
 const STYLE: Group = { title: 'Style', note: 'Each opens its popup — arrows walk it', rows: [
-  { keys: k('style'), label: 'Style — looks, colour, edge, shadow' },
-  { keys: k('background'), label: 'Banner background' },
-  { keys: k('border'), label: 'Banner border' },
-  { keys: k('radius'), label: 'Banner corners' },
+  { keys: k('style'), label: 'Style — look, colour, edge, shadow' },
   { keys: k('alignH'), label: 'Horizontal alignment' },
   { keys: k('alignV'), label: 'Vertical alignment' },
-  { keys: k('icon'), label: 'Icon — cards and tiles' },
   { keys: k('presets'), label: 'Arrangement and presets' },
   { keys: ['P'], label: 'Spacing' },
 ] };
@@ -345,111 +338,13 @@ const DOCUMENT: Group = { title: 'Document', rows: [
   { keys: combo(ck('undo')), label: 'Undo' },
   { keys: combo(ck('redo')), label: 'Redo' },
   { keys: combo(ck('saveDraft')), label: 'Save as draft' },
-  { keys: ck('help'), label: 'This sheet' },
+  { keys: ck('help'), label: 'Keyboard shortcuts' },
 ] };
 
-/** Rows of the sheet, top to bottom; each row is two columns, each column a stack of groups. */
-const LAYOUT: Group[][][] = [
-  [[BUILDER], [PLACE]],
-  [[SELECT, MOVE], [STYLE, DOCUMENT]],
-];
+/* ⚠️ EXPORTED for the global Keyboard shortcuts panel (`shortcutRegistry`), in PRIORITY order — the
+   builder's own sheet is gone; the global panel lists these as the 'Support Portal builder' module. */
+export const PORTAL_SHORTCUT_GROUPS: Group[] = [BUILDER, PLACE, SELECT, MOVE, STYLE, DOCUMENT];
 
 /* `TipKeys` lives in `PortalTipKeys.tsx` so the canvas can use it without an import cycle; re-exported
    here so every existing `import { TipKeys } from './PortalShortcuts'` keeps working. */
 export { TipKeys } from './PortalTipKeys';
-
-/* The ticket page's key cap, deliberately the same — one product, one way of drawing a key. */
-function Kbd({ children }: { children: React.ReactNode }) {
-  return (
-    <kbd className="inline-flex h-[20px] min-w-[20px] items-center justify-center rounded border border-[#DFE5ED] bg-[#F8FAFC] px-1.5 text-[10px] font-semibold text-[#364658] shadow-[0_1px_0_#DFE5ED]">
-      {children}
-    </kbd>
-  );
-}
-
-function ShortcutRow({ keys, label, lead, off }: Row & { off?: boolean }) {
-  return (
-    /* ⚠️ The LABEL leads and the KEYS close the row (Zeni's call, 28 Sep 2026). A reader scans a sheet
-       for the THING they want to do, then reads off its key — so the words go where the eye starts, and
-       the caps line up down the right edge where they can be compared column by column. */
-    <div className={`flex items-center justify-between gap-3 py-[3px] ${off ? 'opacity-40' : ''}`} title={off ? 'Turn on single-key shortcuts to use this' : undefined}>
-      <span className={`min-w-0 flex-1 truncate text-[12px] ${lead ? 'font-semibold text-[#1E293B]' : 'text-[#64748B]'}`}>{label}</span>
-      <span className="flex flex-shrink-0 items-center gap-1">
-        {keys.map((x, i) => (x === '+' || x === '/'
-          ? <span key={i} className="text-[10px] text-[#9CA3AF]">{x}</span>
-          : <Kbd key={i}>{x}</Kbd>))}
-      </span>
-    </div>
-  );
-}
-
-function GroupBlock({ g, first, letters }: { g: Group; first: boolean; letters: boolean }) {
-  return (
-    <div className={first ? '' : 'mt-3 border-t border-[#F0F1F3] pt-2.5'}>
-      <div className="mb-1 flex items-baseline justify-between gap-2">
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-[#9CA3AF]">{g.title}</span>
-        {g.note && <span className="truncate text-[10.5px] text-[#B0BAC6]">{g.note}</span>}
-      </div>
-      {g.rows.map((r) => <ShortcutRow key={r.label} {...r} off={!letters && r.keys.some((x) => /^[A-Z]$/.test(x)) && !r.keys.some((x) => x === 'Ctrl' || x === 'Alt')} />)}
-    </div>
-  );
-}
-
-function Sheet({ onClose }: { onClose: () => void }) {
-  const [letters, setLetters] = useState(lettersOn());
-  const flip = () => { setLettersOn(!letters); setLetters(!letters); };
-  return createPortal(
-    <>
-      <div className="fixed inset-0 z-[10050] bg-black/30" onClick={onClose} />
-      {/* ⚠️ The TICKET page's popup, widened to two columns — same title row with the keyboard glyph,
-          same small uppercase section heads, same caps joined by `+`. The builder has three times as
-          many keys, so one column would scroll for a screen and a half. */}
-      <div className="fixed left-1/2 top-1/2 z-[10051] flex max-h-[88vh] w-[760px] max-w-[94vw] -translate-x-1/2 -translate-y-1/2 flex-col rounded-xl border border-[#E5E7EB] bg-white shadow-2xl">
-        <div className="flex flex-shrink-0 items-start justify-between gap-3 border-b border-[#E5E7EB] px-5 py-3.5">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 text-[15px] font-semibold text-[#111827]">
-              <Keyboard size={17} className="text-[#3D8BD0]" /> Keyboard Shortcuts
-            </div>
-            {/* The one sentence that makes the rest guessable. */}
-            <p className="mt-1 text-[11.5px] text-[#7B8FA5]">
-              Alt is the builder, arrows move what is selected, Shift resizes it, Ctrl is the document. Single letters are off until you switch them on.
-            </p>
-          </div>
-          <label className="ml-auto flex flex-shrink-0 cursor-pointer items-center gap-2 self-center rounded-md border border-[#E5E7EB] px-2.5 py-1.5">
-            <span className="text-[12px] text-[#364658]">Single-key shortcuts</span>
-            <button
-              role="switch"
-              aria-checked={letters}
-              onClick={flip}
-              className={`relative h-[18px] w-8 rounded-full transition-colors ${letters ? 'bg-[#3D8BD0]' : 'bg-[#CBD5E1]'}`}
-            ><span className={`absolute top-[2px] size-[14px] rounded-full bg-white shadow transition-all ${letters ? 'left-[16px]' : 'left-[2px]'}`} /></button>
-          </label>
-          <button onClick={onClose} aria-label="Close" className="flex size-8 flex-shrink-0 items-center justify-center rounded text-[#6B7280] transition-colors hover:bg-[#F3F4F6] hover:text-[#111827]">
-            <X size={18} />
-          </button>
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto px-5">
-          {LAYOUT.map((row, ri) => (
-            <div key={ri} className={`grid grid-cols-2 gap-x-8 py-3.5 ${ri ? 'border-t border-[#E5E7EB]' : ''}`}>
-              {row.map((col, ci) => (
-                <div key={ci} className="min-w-0">
-                  {col.map((g, gi) => <GroupBlock key={g.title} g={g} first={gi === 0} letters={letters} />)}
-                </div>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        {/* ⚠️ Stated, not silently true. Both are real limits somebody will otherwise hit and report
-            as a bug: the canvas cannot be arrow-scrolled while a widget is selected, and Publish has
-            no key on purpose. */}
-        <p className="flex-shrink-0 border-t border-[#EEF1F5] px-5 py-2.5 text-[11px] text-[#9CA3AF]">
-          Press <span className="font-medium text-[#64748B]">Esc</span> to deselect before arrow-scrolling the canvas.
-          Publish has no shortcut — it changes what requesters see, so it keeps its button.
-        </p>
-      </div>
-    </>,
-    document.body,
-  );
-}

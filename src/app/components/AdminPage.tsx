@@ -8,6 +8,8 @@ import { AdminBomModule } from './AdminBomModule';
 import type { BomAdminScreen } from './AdminBomModule';
 import { AdminOsUpgradeModule } from './AdminOsUpgradeModule';
 import { AdminSupportPortalModule } from './AdminSupportPortalModule';
+import { AdminRequestFormModule } from './AdminRequestFormModule';
+import { AdminUserSurveyModule } from './AdminUserSurveyModule';
 
 /** Sections that have a real module behind them rather than only a card grid. Selecting one in
  *  the sidebar opens that module; everything else still scrolls the Overview. */
@@ -26,10 +28,15 @@ const BOM_SCREEN_FOR: Record<string, BomAdminScreen> = {
  *  it, so only that row swaps the pane. */
 const CARD_MODULES: Record<string, string> = {
   'Patch Management/OS Upgrade': 'OS Upgrade',
+  /* Both rows land on ONE page with two tabs — the form and the rules that act on it are one
+     subject. Which tab opens is read from the card (activeCard). */
+  'Request Management/Request Form': 'Request Form',
+  'Request Management/Request Form Rule': 'Request Form',
   /* ⚠️ Support Channels, not Organization. The portal's settings already lived here, so putting its
      customization anywhere else meant two homes for one subject. The card that used to open this
      from Organization is gone rather than left as a second door. */
   'Support Channels/Support Portal': 'Support Portal',
+  'User Survey/User Surveys': 'User Surveys',
 };
 
 /* Admin hub — the settings surface. Its own shell: the product's left icon rail is replaced by a
@@ -170,6 +177,18 @@ export function AdminPage({ onNavigate, moduleSlug, onModuleChange, portalSlug, 
                portal list page — head, search, then a full-bleed table with no card around it. */
             <div className="min-h-0 flex-1 overflow-y-auto bg-white">
               <AdminOsUpgradeModule />
+            </div>
+          ) : module === 'Request Form' ? (
+            <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+              <AdminRequestFormModule
+                tab={activeCard === 'Request Form' ? 'builder' : 'rules'}
+                onTab={(t) => select('Request Management', t === 'builder' ? 'Request Form' : 'Request Form Rule')}
+                onEditor={setBuilderOpen}
+              />
+            </div>
+          ) : module === 'User Surveys' ? (
+            <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+              <AdminUserSurveyModule />
             </div>
           ) : module === 'Support Portal' ? (
             <div className="min-h-0 flex-1 overflow-y-auto bg-white">

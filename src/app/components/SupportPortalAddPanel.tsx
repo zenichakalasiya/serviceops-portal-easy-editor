@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  Boxes, Check, ChevronsUpDown, ClipboardList, Download, GalleryHorizontal, Gauge, Heading, LayoutPanelLeft, PlayCircle,
+  Boxes, Check, ChevronDown, ChevronRight, ChevronsUpDown, ClipboardList, Download, GalleryHorizontal, Gauge, Heading, LayoutPanelLeft, PlayCircle,
   HelpCircle, Image as ImageIcon, Images, KeyRound, LayoutGrid, LayoutTemplate, LifeBuoy, Link2, List, Mail,
   Megaphone, Minus, MousePointerClick, MoveVertical, Network, PanelTop, Phone, Plus, Rows3, Search, Shapes, Share2,
   ShoppingCart, Smile, Square, Star, Table, Timer, Type, X, Zap,
@@ -129,6 +129,15 @@ export function SupportPortalAddPanel({ onAdd, placed }: Props) {
      Hover state lives on the PANEL, not the row — only one preview may be open at a time, and no
      single row owns that fact. */
   const [peek, setPeek] = useState<{ id: string; rect: DOMRect } | null>(null);
+  /* Groups whose "N on this page" fold is open. ⚠️ PROGRESSIVE DISCLOSURE (Zeni, 1 Oct 2026): a
+     predefined widget already on the page cannot be added again, so it stops taking a full row in the
+     list — it folds into one count on the RIGHT of its group's title, and the rows you CAN add sit
+     together without scrolling past a wall of ticked ones. Folded from the first one placed, never
+     after some threshold, so the list behaves the same way on every page. */
+  /** A press that STARTS on the "+" zone must never become a drag — it is a click on the button. */
+  const pressOnAdd = useRef(false);
+  const [openAdded, setOpenAdded] = useState<Set<string>>(new Set());
+  const toggleAdded = (g: string) => setOpenAdded((cur) => { const n = new Set(cur); if (n.has(g)) n.delete(g); else n.add(g); return n; });
 
   const q = query.trim().toLowerCase();
 
@@ -304,11 +313,39 @@ export function SupportPortalAddPanel({ onAdd, placed }: Props) {
              both scroll-to-group and the spy. Scoped per group, a header un-pins as its own group
              scrolls out and the next one takes over, which is the behaviour we wanted anyway. */
           <div key={group} ref={(el) => { groupRefs.current[group] = el; }}>
-            <h3 className="sticky top-0 z-10 bg-white pb-2 pt-3 text-[11px] font-semibold uppercase tracking-wider text-[#7B8FA5]">
-              {group}
+            <h3 className={`sticky top-0 z-10 flex items-center justify-between bg-white ${!q && !openAdded.has(group) && items.every((e) => placed?.has(e.id)) ? 'pb-1' : 'pb-2'} pt-3 text-[11px] font-semibold uppercase tracking-wider text-[#7B8FA5]`}>
+              <span>{group}</span>
+              {/* The fold. A search opens it on its own — you typed to find something, so a match
+                  must never be hidden behind a click. */}
+              {(() => {
+                const n = items.filter((e) => placed?.has(e.id)).length;
+                if (!n || q) return null;
+                const open = openAdded.has(group);
+                return (
+                  <button
+                    type="button"
+                    onClick={() => toggleAdded(group)}
+                    aria-expanded={open}
+                    title={open ? 'Hide the widgets already on this page' : 'Show the widgets already on this page'}
+                    className="flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium normal-case tracking-normal text-[#7B8FA5] transition-colors hover:bg-[#F5F7FA] hover:text-[#364658]"
+                  >
+                    {n} on this page
+                    {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                  </button>
+                );
+              })()}
             </h3>
+            {!q && !openAdded.has(group) && items.every((e) => placed?.has(e.id)) && (
+              /* One quiet line under the title (Zeni, 1 Oct 2026) — a row-sized dashed box was too heavy for
+                 "nothing to add here". */
+              <p className="mb-2 text-[12px] leading-[18px] text-[#9AA6B6]">All added to the page</p>
+            )}
             <div className="space-y-2">
-              {items.map((e) => {
+              {/* Addable rows first, then — only while the fold is open, or while searching — the ones
+                  already on the page, so opening it never moves a row you were about to reach for. */}
+              {[...items.filter((e) => !placed?.has(e.id)), ...items.filter((e) => placed?.has(e.id))]
+                .filter((e) => q || !placed?.has(e.id) || openAdded.has(group))
+                .map((e) => {
                 /* ⚠️ The BUILDER decides what counts as predefined and what is currently on the
                    page; this only reads the answer. Testing `e.node` here as well was a second,
                    narrower copy of that rule — and the narrower one won, which is why Announcements
@@ -335,36 +372,58 @@ export function SupportPortalAddPanel({ onAdd, placed }: Props) {
                        most want explained. The click is guarded below instead, the tooltip still
                        carries the reason, and assistive tech is told the same thing. */
                     aria-disabled={added || undefined}
+                    /* ⚠️ INLINE, not `cursor-grab`: theme.css gives every [role="button"] a pointer, unlayered, which
+                       beats the utility class — the row read as "click me" when its body only drags. */
+                    style={{ cursor: added ? "not-allowed" : "default" }}
                     onDragStart={(ev) => {
+                      if (pressOnAdd.current) { ev.preventDefault(); return; }
+                      /* Only the icon + name (the open-hand area) picks a widget up. A press on the
+                         row's empty space, where the cursor is the normal arrow, must not drag. */
+                      const from = document.elementFromPoint(ev.clientX, ev.clientY);
+                      if (ev.clientX && !from?.closest('[data-grab]')) { ev.preventDefault(); return; }
                       // The canvas reads this to know what was dropped.
                       ev.dataTransfer.setData('text/portal-element', e.id);
                       ev.dataTransfer.effectAllowed = 'copy';
                       // A card floating beside the cursor while you aim a drop is in the way.
                       setPeek(null);
                     }}
-                    onClick={() => { if (!added) onAdd(e.id); }}
+                    /* ⚠️ The row BODY drags and does nothing on a click (Zeni, 1 Oct 2026): a drag
+                       that misses by a pixel used to land as a click and drop the widget at the foot
+                       of the page. The hand cursor says "pick me up"; the "+" is the one click-to-add,
+                       with a pointer cursor of its own. Enter/Space still add, for the keyboard. */
                     onMouseEnter={(ev) => setPeek({ id: e.id, rect: ev.currentTarget.getBoundingClientRect() })}
                     onMouseLeave={() => setPeek((c) => (c?.id === e.id ? null : c))}
                     /* The reason is on the control, not in a toast after the click — you can read it
                        before you reach for it. */
                     title={added
                       ? `“${e.name}” is already on this page. Remove it from the page to add it again.`
-                      : `Click to add “${e.name}”, or drag it where you want it`}
+                      : `Drag “${e.name}” onto the page, or press + to add it`}
                     className={`group/el flex w-full items-center gap-3 rounded border px-3 py-2.5 text-left transition-all ${
                       added
                         ? 'cursor-not-allowed border-[#EDF0F4] bg-[#FAFBFC]'
                         : 'cursor-grab border-[#E5E7EB] bg-white hover:border-[#3D8BD0] hover:shadow-[0_1px_2px_rgba(16,24,40,0.04),0_2px_8px_rgba(16,24,40,0.06)] active:cursor-grabbing'
                     }`}
                   >
+                    {/* ⚠️ THE GRAB AREA (Zeni, 5 Oct 2026): the open hand shows over the icon and the
+                        name only — the box hugs the name (no flex-1) and reaches 2px past it
+                        (`-m-[2px] p-[2px]`). The rest of the row is the normal arrow, and the "+" the
+                        click cursor, so the cursor says which of the two you are about to do. */}
+                    <span
+                      data-grab
+                      style={{ cursor: added ? 'not-allowed' : 'grab' }}
+                      className="-m-[2px] flex min-w-0 items-center gap-3 p-[2px]"
+                    >
                     {/* Icon and label share one colour in every state — they are one thing. */}
                     <span className={`flex size-8 flex-shrink-0 items-center justify-center rounded transition-colors ${
                       added ? 'bg-[#F1F5F9] text-[#B6BFCC]' : 'bg-[#F1F5F9] text-[#364658] group-hover/el:bg-[#EBF5FF] group-hover/el:text-[#3D8BD0]'
                     }`}>
                       {icon(e.icon)}
                     </span>
-                    <span className={`min-w-0 flex-1 truncate text-[13px] font-medium transition-colors ${
+                    <span className={`min-w-0 truncate text-[13px] font-medium transition-colors ${
                       added ? 'text-[#9AA6B6]' : 'text-[#364658] group-hover/el:text-[#3D8BD0]'
                     }`}>{e.name}</span>
+                    </span>
+                    <span className="flex-1" />
                     {/* ⚠️ A TICK on the right, not the word "Added". The row is already greyed and
                         already carries the reason on hover; a second label would be a third way of
                         saying one thing, in the narrowest column of the panel. */}
@@ -383,13 +442,24 @@ export function SupportPortalAddPanel({ onAdd, placed }: Props) {
                         /* ⚠️ The row is a control as well, so the "+" has to stop the click from
                            reaching it — otherwise one press adds the widget twice. */
                         onClick={(ev) => { ev.stopPropagation(); onAdd(e.id, true); }}
-                        title={`Add “${e.name}” and keep this list open`}
+                        onMouseDown={() => { pressOnAdd.current = true; }}
+                        onMouseUp={() => { pressOnAdd.current = false; }}
+                        onMouseLeave={() => { pressOnAdd.current = false; }}
+                        title="Add to page"
                         aria-label={`Add ${e.name}`}
-                        /* ⚠️ On the design system's light grey (`#F1F5F9`) — the same fill the row's
-                           own icon badge carries. Bare on white it read as a stray glyph rather than
-                           as a control, and a "+" is the one thing on this row you press. */
-                        className="flex size-6 flex-shrink-0 items-center justify-center rounded bg-[#F1F5F9] text-[#64748B] opacity-0 transition-all hover:bg-[#EBF5FF] hover:text-[#3D8BD0] focus-visible:opacity-100 group-hover/el:opacity-100"
-                      ><Plus size={15} /></button>
+                        /* ⚠️ A 5px ZONE round the "+" (Zeni, 5 Oct 2026): the button is the 24px square
+                           plus 5px of transparent padding on every side, pulled back with a matching
+                           negative margin so the row's layout does not move. Inside it the row's open
+                           hand turns into the NORMAL arrow — inline, since theme.css gives every button
+                           a pointer — so you can see you have left the drag area before you reach the
+                           "+", and a press anywhere in the zone adds, never drags. */
+                        style={{ cursor: 'default' }}
+                        className="group/add -m-[5px] flex flex-shrink-0 items-center justify-center p-[5px] opacity-0 transition-opacity focus-visible:opacity-100 group-hover/el:opacity-100"
+                      >
+                        {/* ⚠️ On the design system's light grey (`#F1F5F9`) — the same fill the row's
+                            own icon badge carries. Bare on white it read as a stray glyph. */}
+                        <span style={{ cursor: 'pointer' }} className="flex size-6 items-center justify-center rounded bg-[#F1F5F9] text-[#64748B] transition-colors group-hover/add:bg-[#EBF5FF] group-hover/add:text-[#3D8BD0]"><Plus size={15} /></span>
+                      </button>
                     )}
                   </div>
                 );

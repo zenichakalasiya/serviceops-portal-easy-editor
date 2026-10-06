@@ -572,14 +572,23 @@ body[data-portal-dragging] [data-portal-toolbar] { pointer-events: none; opacity
 .portal-range:hover::-webkit-slider-thumb { transform: scale(1.2); }
 .portal-range:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 2px rgba(61, 139, 208, 0.3), 0 1px 2px rgba(16, 24, 40, 0.25); }
 
-/* Support Portal builder — a toolbar divider only ever SEPARATES. `Rule` (PortalCanvas) is tagged
-   `tb-rule` and the hover tip `tb-tip`; a rule is hidden unless some real control comes before it,
-   and hidden again when another rule follows it or it ends the bar. So a bar never opens on a line,
-   doubles one, or trails one, whichever of its controls a given element happens to get. */
+/* Support Portal builder — floating toolbar dividers (Zeni, 30 Sep 2026): ONE divider, right after the drag
+   GRIP and one before DELETE, and none anywhere else. Every `Rule` (`tb-rule`) between the other buttons is hidden; the grip
+   (`tb-grip`) draws its own divider on its right edge, so it shows on every bar that has a grip — widgets,
+   text, the banner's Text & Search section — whatever buttons follow it. Bars with no grip have no divider.
+   To bring the group dividers back, delete the first rule below. */
 [data-portal-toolbar] > .tb-rule { display: none; }
-[data-portal-toolbar] > :not(.tb-rule):not(.tb-tip) ~ .tb-rule { display: block; }
-[data-portal-toolbar] > .tb-rule:has(+ .tb-rule),
-[data-portal-toolbar] > .tb-rule:last-child { display: none; }
+/* …except the one fencing DELETE off from everything else (Zeni, 1 Oct 2026): a destructive action sits apart. */
+[data-portal-toolbar] > .tb-rule:has(+ [data-tip^="Delete"]) { display: block; }
+/* Never two lines in a row: a grip directly before that rule already draws its own. */
+[data-portal-toolbar] > .tb-grip + .tb-rule,
+[data-portal-toolbar] > .tb-grip + .tb-rule + .tb-rule,
+[data-portal-toolbar] > .tb-grip + .tb-rule + .tb-rule + .tb-rule { display: none; }
+[data-portal-toolbar] > .tb-grip:not(:last-child) { position: relative; margin-right: 5px; }
+[data-portal-toolbar] > .tb-grip:not(:last-child)::after {
+  content: ""; position: absolute; right: -3px; top: 50%; width: 1px; height: 16px;
+  transform: translateY(-50%); background: var(--bar-rule, #E5E7EB); pointer-events: none;
+}
 
 /* Support Portal builder — ONE tab strip, everywhere (from the Figma pill design, 25 Sep 2026).
    A light-grey track holding its options; the chosen one is lifted out as a white pill with a soft
@@ -773,33 +782,18 @@ body[data-portal-dragging] [data-portal-toolbar] { pointer-events: none; opacity
    its content (measured: 10 here = 11 on screen). Unlayered, so it beats the `px-3` on TooltipContent. */
 [data-slot='tooltip-content']:has(> .tip-keys) { padding-right: 10px; }
 
-/* ── The page-wide STYLE KIT (Theme → Page style) ─────────────────────────────────────────────────
-   The theme wrapper carries `portal-kit-look-*`, `portal-kit-corners-*` and `portal-kit-space-*`;
-   every card surface carries `portal-card` and every band `portal-section`. Standard adds no class,
-   so an untouched portal renders exactly as it always did.
-   ⚠️ No !important anywhere. A card styled by hand carries its values INLINE, and inline beats these
-   rules — which is what "hand-styled cards keep their look" means, with no bookkeeping behind it. */
-.portal-kit-look-flat .portal-card { border-color: transparent; box-shadow: none; }
-.portal-kit-look-outlined .portal-card { border: 1px solid #CBD5E1; box-shadow: none; }
-.portal-kit-look-soft .portal-card {
-  border-color: transparent;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04), 0 6px 18px -6px rgba(16, 24, 40, 0.12);
-}
-.portal-kit-look-raised .portal-card {
-  border-color: transparent;
-  box-shadow: 0 2px 4px -1px rgba(16, 24, 40, 0.06), 0 14px 28px -8px rgba(16, 24, 40, 0.18);
-}
-.portal-dark.portal-kit-look-outlined .portal-card { border-color: #33466A; }
-.portal-dark.portal-kit-look-soft .portal-card,
-.portal-dark.portal-kit-look-raised .portal-card { box-shadow: 0 10px 28px -10px rgba(0, 0, 0, 0.55); }
+/* ── A data card's own horizontal alignment (cardAlignCss / cardAlignClass) ──
+   The text column stops GROWING, so in a side-by-side template the icon and the words move across
+   the card as one group; nested flex lines (a record tile's id · type row) follow the same side;
+   and no child may pin its own text-align over the card's. */
+/* ⚠️ `flex: 0 1 auto`, not just grow 0: the text column is `flex-1` (basis 0), so without the auto
+   basis it collapsed to zero width and its words spilled out of the card. */
+.card-align > * { flex: 0 1 auto !important; }
+.card-align [data-card-line] { justify-content: var(--card-justify, flex-start); }
+.card-align [data-card-col] { align-items: var(--card-justify, flex-start); }
+.card-align * { text-align: inherit !important; }
 
-.portal-kit-corners-sharp .portal-card { border-radius: 4px; }
-.portal-kit-corners-rounded .portal-card { border-radius: 12px; }
-.portal-kit-corners-round .portal-card { border-radius: 20px; }
-
-/* Only the band's inset — the gap BETWEEN cards is inline and follows `kitGap()`. A band that sets
-   its own top padding for a reason (the search floating over the Quick Actions row) keeps it. */
-.portal-kit-space-compact .portal-section { padding-left: 16px; padding-right: 16px; }
-.portal-kit-space-compact .portal-section:not([class*=" pt-"]) { padding-top: 8px; padding-bottom: 8px; }
-.portal-kit-space-spacious .portal-section { padding-left: 32px; padding-right: 32px; }
-.portal-kit-space-spacious .portal-section:not([class*=" pt-"]) { padding-top: 20px; padding-bottom: 20px; }
+/* ── A column's horizontal STRETCH (ColumnBody, data-col-stretch) ──
+   The widget fills its column: a button spans edge to edge, and a widget dragged narrower fills again. */
+[data-col-stretch] > [data-node] { width: 100% !important; max-width: 100% !important; }
+[data-col-stretch] .portal-btn { width: 100%; }

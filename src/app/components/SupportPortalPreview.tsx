@@ -16,12 +16,12 @@ import {
   PORTAL_APPROVALS, PORTAL_ARTICLES, PORTAL_ARTICLE_TOTAL, PORTAL_OPEN_REQUESTS, PORTAL_OPEN_REQUEST_TOTAL, statusTone,
 } from './supportPortalData';
 import { AddSectionSeam, BannerSlot, ColumnAdders, MOVE_MIME, Sel, draggedElement, draggedNode, styleOf, useCanvas } from './PortalCanvas';
-import { HUGS_CONTENT, bannerGroupGap, inBanner } from './portalPageModel';
+import { HUGS_CONTENT, bannerGroupGap, cardAlignClass, cardAlignCss, colAlign, inBanner } from './portalPageModel';
 import { bannerGradientOf, bannerLayerCss, gradientCss } from './PortalBannerTools';
 import type { BannerDecor } from './portalBannerTemplates';
 import { ImagePlus } from 'lucide-react';
-import { PAGE_ID, chosen, iconBoxCss, kitGap, roleStyle } from './portalStyleResolver';
-import { bannerLayout } from './supportPortalData';
+import { PAGE_ID, chosen, iconBoxCss, roleStyle } from './portalStyleResolver';
+import { bannerLayout, isPredefinedType } from './supportPortalData';
 import { shadowCss } from './PortalBoxControls';
 import { PlacedBlockRenderers, PortalPlacedElement } from './PortalPlacedElement';
 import { TONE } from './portalTone';
@@ -340,6 +340,17 @@ function ColumnBody({ id, item, band, live, dir, icons, placedText, cfg }: { id:
    * ⚠️ HALF for a column and a fixed band for a row, because the two are different promises: a new
    * column takes a share of the width, while a new row takes as much height as its content needs
    * and cannot be known before it lands. */
+  /* ⚠️ The COLUMN's alignment places what it holds (colAlign walks up the boxes, per axis). Default is
+     TOP-LEFT: a filled cell used to centre its widget vertically whatever anyone picked. */
+  const ca = colAlign(styles as never, id);
+  const inSection = /^sec-\d+/.test(id);
+  const X: Record<string, string> = { left: 'flex-start', center: 'center', right: 'flex-end', stretch: 'stretch' };
+  const Y: Record<string, string> = { start: 'flex-start', center: 'center', end: 'flex-end' };
+  const placeStyle: React.CSSProperties = full && item && inSection ? {
+    alignItems: X[ca.h ?? 'left'] ?? 'flex-start',
+    justifyContent: Y[ca.v ?? 'start'] ?? 'flex-start',
+    ['--col-text-align' as string]: ca.h && ca.h !== 'stretch' ? ca.h : 'left',
+  } : {};
   const reserve = over && zone && zone !== 'in' ? zone : null;
   const sideways = reserve === 'left' || reserve === 'right';
   const gap: React.CSSProperties = !reserve ? {}
@@ -434,7 +445,8 @@ function ColumnBody({ id, item, band, live, dir, icons, placedText, cfg }: { id:
         e.dataTransfer.setData(MOVE_MIME, item.id);
         e.dataTransfer.effectAllowed = 'move';
       } : undefined}
-      style={{ ...gap, transition: 'padding 130ms ease' }}
+      style={{ ...gap, ...placeStyle, transition: 'padding 130ms ease' }}
+      data-col-stretch={full && item && inSection && ca.h === 'stretch' ? '' : undefined}
     >
       {/* ⚠️ The element gets its OWN Sel. Without one the column was the innermost selectable thing,
           so clicking a collection widget selected the column — and with items now selectable inside
@@ -464,7 +476,8 @@ function ColumnBody({ id, item, band, live, dir, icons, placedText, cfg }: { id:
           {item.type === 'bn-heading' || item.type === 'bn-subheading' || item.type === 'bn-search' ? (
             <div className="w-full">{item.type === 'bn-heading' ? bannerParts.heading : item.type === 'bn-subheading' ? bannerParts.subheading : bannerParts.search}</div>
           ) : (
-            <Sel id={item.id} className={HUGS_CONTENT.has(item.type) ? 'w-fit max-w-full' : 'w-full'}>
+            <Sel id={item.id} className={HUGS_CONTENT.has(item.type) ? 'w-fit max-w-full' : isPredefinedType(item.type) ? 'flex w-full flex-1 flex-col [&>*]:flex-1' : 'w-full'}>
+              {/* A PREDEFINED card fills its cell's height, so cards side by side stay equal — the old work band's look. */}
               <PortalPlacedElement item={item} icon={icons?.[item.id]} text={placedText?.[item.id]} cfg={cfg?.(item.id)} />
             </Sel>
           )}
@@ -517,7 +530,7 @@ function ColumnBody({ id, item, band, live, dir, icons, placedText, cfg }: { id:
    other one was inset by 24px: it looked unaligned because it WAS, by exactly the padding.
    Half-vertical is the whole point — the horizontal gutter is the page's widest measure, so tying
    the vertical to it makes the page one rhythm rather than two. */
-export const SECTION_PAD = 'portal-section px-6 py-3';
+export const SECTION_PAD = 'px-6 py-3';
 
 /* The rendered node for each built-in band this page is HOSTING inside a section tree.
  *
@@ -634,6 +647,12 @@ function BoxChildren({ box, resize, icons, placedText, cfg }: {
   const weights = kids.map((c) => c.weight);
   /* The gap between these children: the columns' gap along a row, the rows' gap down a column. */
   const gapCfg = cfg?.(box.id) ?? {};
+  /* ⚠️ A STACKED column (dir: column) places its rows with its own vertical alignment — Stretch pushes the
+     first to the top and the last to the bottom with the space between them. It fills its cell so the
+     spare height exists to distribute. A row of columns leaves this to each column's own cell. */
+  const { styles: stylesForAlign } = useCanvas();
+  const stackV = box.dir === 'column' && /^sec-\d+/.test(box.id) ? colAlign(stylesForAlign as never, box.id).v : undefined;
+  const stackJustify = stackV ? ({ start: 'flex-start', center: 'center', end: 'flex-end', stretch: 'space-between' } as Record<string, string>)[stackV] : undefined;
   const boxGap = box.dir === 'row' ? Number(gapCfg.__gapX ?? BOX_GAP) : Number(gapCfg.__gapY ?? BOX_GAP);
   const { dropBeside } = useCanvas();
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -703,11 +722,11 @@ function BoxChildren({ box, resize, icons, placedText, cfg }: {
       ref={wrapRef}
       {...gapHandlers}
       data-width-root
-      className="relative flex min-w-0"
+      className={`relative flex min-w-0 ${box.dir === 'column' ? 'h-full' : ''}`}
       /* `dir` IS `flex-direction`. That is the whole of the behaviour setting: a row lays its
          children left-to-right so each reads as a column, a column stacks them so each reads as a
          row. Flipping it moves nothing and destroys nothing. */
-      style={{ flexDirection: box.dir, gap: boxGap, alignItems: box.dir === 'row' ? 'stretch' : undefined }}
+      style={{ flexDirection: box.dir, gap: boxGap, alignItems: box.dir === 'row' ? 'stretch' : undefined, justifyContent: stackJustify }}
       data-dir={box.dir}
       data-gap-parent={box.id}
     >
@@ -1591,14 +1610,14 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
      so switching a row to Fixed changes nothing on screen: the columns hold the widths they already
      had, and from that point only what you drag moves. A mode that visibly rearranged the page the
      moment you chose it would be read as having done something wrong. */
-  const share = (cols: number, gap = kitGap(), grow = 1): React.CSSProperties => ({ flex: `${grow} ${grow} calc((100% - ${(cols - 1) * gap}px) / ${cols})` });
+  const share = (cols: number, gap = 16, grow = 1): React.CSSProperties => ({ flex: `${grow} ${grow} calc((100% - ${(cols - 1) * gap}px) / ${cols})` });
 
   /* §7.21 — a section owns its column count, its gap and the air above and below it. Read through
      the widget config so the drawer's sliders move the real band. */
   const secCols = (id: string, fallback: number) => Number(wc(id).cols ?? fallback);
-  const secGap = (id: string) => Number(wc(id).colGap ?? kitGap());
+  const secGap = (id: string) => Number(wc(id).colGap ?? 16);
   /* Row gap, then column gap — the two values of the `gap` shorthand. */
-  const secGapCss = (id: string) => `${Number(wc(id).rowGap ?? wc(id).colGap ?? kitGap())}px ${secGap(id)}px`;
+  const secGapCss = (id: string) => `${Number(wc(id).rowGap ?? wc(id).colGap ?? 16)}px ${secGap(id)}px`;
   /* §Responsive behaviour — how this section's first-layer columns share their row. */
   const secResize = (id: string) => String(wc(id).resize ?? 'fill');
   const secGrow = (id: string) => (secResize(id) === 'fixed' ? 0 : 1);
@@ -2149,7 +2168,7 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
       : card('contact', <div className="p-4">{body}</div>, 1, secGap('work'), 1);
   };
 
-  const card = (id: string, body: ReactNode, cols?: number, gap = kitGap(), grow = 1, orderAt?: number, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => {
+  const card = (id: string, body: ReactNode, cols?: number, gap = 16, grow = 1, orderAt?: number, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => {
     /* ⚠️ A REPLACED built-in card draws its replacement IN ITS OWN SLOT — same order, same share of
        the row, same face. Appending it to the row instead put it beside a work band's main region
        AND its rail, which squeezed every card in the band to a sliver. */
@@ -2185,12 +2204,12 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
     (String(wc(id).titlePlace ?? 'inside') === 'outside' || String(wc(id).display ?? '') === 'image'
       ? 'min-w-0'
       : squareCards
-      ? 'portal-card min-w-0 rounded-md border border-[#E5E7EB] bg-white'
+      ? 'min-w-0 rounded-md border border-[#E5E7EB] bg-white'
       : spineCards
-      ? 'portal-card min-w-0 overflow-hidden rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
-      : 'portal-card min-w-0 rounded-xl border border-[#E5E7EB] bg-white');
+      ? 'min-w-0 overflow-hidden rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
+      : 'min-w-0 rounded-xl border border-[#E5E7EB] bg-white');
 
-  const cardInner = (id: string, body: ReactNode, cols: number | undefined, order: number, gap = kitGap(), grow = 1, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => (
+  const cardInner = (id: string, body: ReactNode, cols: number | undefined, order: number, gap = 16, grow = 1, look?: { full?: boolean; bare?: boolean; fill?: boolean }) => (
     /* ⚠️ No overflow-hidden here. The chip sits at -top-4 and the toolbar at -top-11, both OUTSIDE
        the wrapper — clipping it silently removes the card's hover outline and quick actions. */
     /* ⚠️ `min-w-0` is what makes the row honour its column count. Without it a card's widest
@@ -2507,7 +2526,8 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
              chose" from "chose start", so any card carrying a left-ish value quietly
              out-voted the template it was told to follow — and the result looked like the
              icon had fallen out of the row rather than like an arrangement anyone picked. */
-          const centre = top || tileActions || c.contentAlign === 'center';
+          const ownAlign = styles[a.id]?.align;
+          const centre = !ownAlign && (top || tileActions || c.contentAlign === 'center');
           // P6: the icon's size, colour and container are style; WHICH icon is content.
           const iconSize = chosen(styles, a.id, 'iconSize') ?? (opts?.row ? 18 : 22);
           const iconColor = chosen(styles, a.id, 'iconColor');
@@ -2529,7 +2549,7 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
                    zero: setting a left inset silently removed the card's 16px top and
                    bottom. An inline side beats the class on its own edge and leaves the
                    other three resting where they were, which is what "set one side" means. */
-                style={{ ...st(a.id), ...fillCss(c), ...padCss(a.id), minHeight: Number(c.minHeight) || undefined }}
+                style={{ ...st(a.id), ...fillCss(c), ...padCss(a.id), minHeight: Number(c.minHeight) || undefined, ...cardAlignCss(styles[a.id], tpl) }}
                 /* ⚠️ The action cards follow the PAGE's card look too. Left on the hairline
                    treatment while the record cards below had gone borderless, the page ended
                    up with two card languages one band apart — which is the exact fault the
@@ -2543,11 +2563,11 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
                     : opts?.row
                     ? 'rounded-lg border border-[#E6E6E6] bg-white transition-colors hover:border-[#C3CBD6]'
                     : spineCards
-                    ? 'portal-card rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
-                    : 'portal-card rounded-lg border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.06)]'
+                    ? 'rounded-[14px] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_8px_24px_-12px_rgba(16,24,40,0.14)]'
+                    : 'rounded-lg border border-[#E5E7EB] bg-white shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.06)]'
                 } ${
                   top ? 'flex-col' : stackedLeft ? 'flex-col justify-between' : iconRight ? 'flex-row-reverse items-center' : 'items-center'
-                } ${centre ? 'items-center text-center' : ''}`}
+                } ${centre ? 'items-center text-center' : ''} ${cardAlignClass(styles[a.id])}`}
               >
                 {/* The ADMIN's corner arrow — off unless the card's panel asks for it.
                     ⚠️ ALWAYS the top-right corner, whatever the card's template. A row of four cards
@@ -3655,6 +3675,9 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
               )
             ))}
             {band('favourites', after('favourites'))}
+            {/* ⚠️ With the two service rows SPLIT into one row, the services band never draws its own
+                `after`, so sections anchored after it were silently invisible. Drawn here instead. */}
+            {browseSplit && band('services', after('services'))}
 
             {/* ⚠️ Renders NOTHING while the browse row is split — the favourites band above draws
                 both. Returning null here rather than dropping the band from `blockOrder` keeps
@@ -3690,7 +3713,9 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
 
             {/* ── Work row ── */}
             {/* ── Work row ── one section, three cards, full width. */}
-            {hostBand("work",
+            {/* ⚠️ GATED like every other band: the default page has no work band (its cards are two real
+                sections), and ungated this drew the band whatever the block order said. */}
+            {band("work", hostBand("work",
             <Sel id="work" className={SECTION_PAD} style={{ order: slot("work"), ...fillCss(wc('work')) }}>
               <RowDrop rowId="work" resize={secResize("work")} className={`flex flex-wrap${secPacked("work", 3) ? " portal-row-packed" : ""}`} style={{ gap: secGapCss("work"), ...secBox("work", 3), ...rowFits(inRow("work"), "work"), ...secGrid("work", 3) }}>
               {(() => {
@@ -3924,7 +3949,7 @@ export function SupportPortalPreview({ accent = '#0F172A', content = DEFAULT_CON
                 ))}
               </RowDrop>
             </Sel>
-            )}
+            ))}
 
             {after('work')}
 
@@ -4103,7 +4128,7 @@ function RecordTiles({ nodeId, titleFallback, cfg, rows, total, icon, headIcon }
                a class would be beaten by nothing and a theme default must always yield to a choice.
                The white icon badge below stays white: the tile is the tinted thing now, and the
                badge has to be a step away from whatever it sits on. */
-            <Sel key={r.id} id={`${nodeId}-tile`} style={{ backgroundColor: TONE.wash, ...(tileCols > 1 && i === shown.length - 1 && shown.length % tileCols === 1 ? { gridColumn: '1 / -1' } : null) }} className={`flex min-w-0 gap-2.5 rounded-lg p-3 ${
+            <Sel key={r.id} id={`${nodeId}-tile`} style={{ backgroundColor: TONE.wash, ...(tileCols > 1 && i === shown.length - 1 && shown.length % tileCols === 1 ? { gridColumn: '1 / -1' } : null), ...cardAlignCss(styles[`${nodeId}-tile`], tileTpl) }} className={`flex min-w-0 gap-2.5 rounded-lg p-3 ${cardAlignClass(styles[`${nodeId}-tile`])} ${
               tileTpl === 'top' ? 'flex-col items-center text-center' : tileTpl === 'right' ? 'flex-row-reverse items-start' : 'items-start'
             }`}>
               {tileTpl !== 'none' && (
@@ -4118,9 +4143,9 @@ function RecordTiles({ nodeId, titleFallback, cfg, rows, total, icon, headIcon }
                   and the type are the same rank as each other and a dot between them says so in a
                   line instead of a column — which also holds the tile to two lines whatever the
                   words are, so four of them stay the same height. */}
-              <span className="flex min-w-0 flex-1 flex-col">
+              <span data-card-col className="flex min-w-0 flex-1 flex-col">
                 <span style={roleStyle(styles, nodeId, 'body')} className="truncate text-[13px] font-medium leading-snug text-[#364658]">{r.name}</span>
-                <span className="mt-1 flex min-w-0 items-center gap-1.5">
+                <span data-card-line className="mt-1 flex min-w-0 items-center gap-1.5">
                   {cfg.showId !== false && (
                     <span style={{ backgroundColor: TONE.soft, color: TONE.ink }} className="flex-shrink-0 truncate whitespace-nowrap rounded-sm px-1.5 py-0.5 text-[11px] font-medium">{r.id}</span>
                   )}

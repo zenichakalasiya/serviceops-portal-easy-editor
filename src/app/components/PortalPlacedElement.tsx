@@ -8,7 +8,7 @@ import { colsTemplate } from './portalBannerLayout';
 export const PlacedBlockRenderers = createContext<Record<string, (id: string) => ReactNode>>({});
 import { Image as ImageIcon, PlayCircle, Search, Star } from 'lucide-react';
 import { PORTAL_APPROVALS, PORTAL_ARTICLES, PORTAL_ELEMENTS, PORTAL_OPEN_REQUESTS } from './supportPortalData';
-import { ACTION_TYPES, fillCss, paintsOwnSurface, renderSpec } from './portalPageModel';
+import { ACTION_TYPES, cardAlignClass, cardAlignCss, fillCss, paintsOwnSurface, renderSpec } from './portalPageModel';
 import type { PlacedElement } from './portalPageModel';
 import { COLLECTION_RENDERERS } from './PortalCollectionRender';
 import { ImageUploadZone } from './PortalControls';
@@ -101,7 +101,7 @@ function Surface({ children, id }: { children: React.ReactNode; id: string }) {
     pad ? "" : "p-4",
     /* `h-full` so the card takes the height the wrapper was dragged to. Harmless without one —
        a percentage height against an auto-height parent resolves to auto. */
-    "portal-card flex h-full flex-col",
+    "flex h-full flex-col",
   ].filter(Boolean).join(" ");
   return <div data-surface="" className={cls} style={css}>{children}</div>;
 }
@@ -148,6 +148,9 @@ function specDrivenBody(type: string, cfg: Record<string, unknown> | undefined, 
     <Sel id={`${nodeId}-${part}`} {...rest}>{children}</Sel>;
 
   if (type === 'b-text') {
+    /** The toolbar's horizontal alignment as text alignment — Stretch is justified text. */
+    const textAlignOf = (a: unknown) =>
+      a === 'stretch' ? 'justify' : a === 'left' || a === 'center' || a === 'right' ? a : undefined;
     const html = String(cfg.html ?? '');
     if (!html) return null;
     return (
@@ -156,7 +159,13 @@ function specDrivenBody(type: string, cfg: Record<string, unknown> | undefined, 
       <div
         className={ownStyle?.height !== undefined ? 'h-full' : undefined}
         style={{
-          textAlign: cfg.textAlign as never,
+          /* ⚠️ The toolbar's / sidebar's HORIZONTAL alignment is the words' alignment. It is stored on the
+             element's style (`align`), which `sizeOf` only acts on for `stretch` — so a Text block, already
+             full width, moved nothing for Left / Centre / Right. Stretch means justified text. The old
+             `cfg.textAlign` (nothing writes it any more) is the fallback so older pages keep their look. */
+          /* ⚠️ Inside an added section the COLUMN decides (`--col-text-align`, set by ColumnBody); the old
+             per-widget value still wins where one was stored, and `cfg.textAlign` is the last fallback. */
+          textAlign: (textAlignOf(ownStyle?.align) ?? `var(--col-text-align, ${String(cfg.textAlign ?? 'left')})`) as never,
           columnCount: cfg.textCols === '2' ? 2 : undefined,
           fontFamily: cfg.font === 'Inherit from theme' ? undefined : (cfg.font as string),
           fontWeight: ({ Light: 300, Normal: 400, Medium: 500, Semibold: 600, Bold: 700 } as Record<string, number>)[String(cfg.weight ?? 'Normal')],
@@ -234,10 +243,12 @@ function specDrivenBody(type: string, cfg: Record<string, unknown> | undefined, 
           /* The Shadow group writes the STYLE store; Sel withholds it from the wrapper for this node. */
           ...(() => { const s = containerCss(styles ?? {}, nodeId).boxShadow; return s ? { boxShadow: s } : {}; })(),
           minHeight: Number(cfg.minHeight) || undefined,
+          /* The card's own alignment, on the axis its template leaves free (cardAlignAxis). */
+          ...cardAlignCss(ownStyle, tpl),
         }}
         className={`flex h-full gap-3 rounded-lg p-4 shadow-[0_1px_2px_rgba(16,24,40,0.04),0_4px_12px_rgba(16,24,40,0.06)] ${
           top ? 'flex-col' : iconRight ? 'flex-row-reverse items-center' : 'items-center'
-        } ${centre ? 'items-center text-center' : ''}`}
+        } ${centre ? 'items-center text-center' : ''} ${cardAlignClass(ownStyle)}`}
       >
         {/* ⚠️ The icon is its own LAYER and opens the picker in place, exactly as the built-in
             quick-action cards do. On a placed card it was the one part you could see and not touch:
@@ -297,7 +308,7 @@ function specDrivenBody(type: string, cfg: Record<string, unknown> | undefined, 
        `[&>*]` reaches ONE level and this button is a grandchild of it. The element that draws the
        button is the only one that can make the button tall. */
     const draggedH = ownStyle?.height !== undefined;
-    const common = `inline-flex max-w-full items-center justify-center gap-2 break-words text-center font-medium ${BTN_SIZE[String(cfg.size ?? 'md')]} ${cfg.fullWidth || dragged ? 'w-full' : ''} ${draggedH ? 'h-full' : ''}`;
+    const common = `portal-btn inline-flex max-w-full items-center justify-center gap-2 break-words text-center font-medium ${BTN_SIZE[String(cfg.size ?? 'md')]} ${cfg.fullWidth || dragged ? 'w-full' : ''} ${draggedH ? 'h-full' : ''}`;
     /* ⚠️ The fallback is the THEME's variable, not a literal: an untouched button has to follow the
        theme's button style, while one that set its own radius keeps it. A hard 6 made every button
        opt out of the theme by default. */

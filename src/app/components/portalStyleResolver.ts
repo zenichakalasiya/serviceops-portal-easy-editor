@@ -137,46 +137,6 @@ export type PortalColorMode = 'light' | 'dark';
 let ACTIVE_MODE: PortalColorMode = 'light';
 export const setPortalColorMode = (m: PortalColorMode) => { ACTIVE_MODE = m; };
 export const portalColorMode = (): PortalColorMode => ACTIVE_MODE;
-/* ── The page-wide STYLE KIT ──────────────────────────────────────────────────
- *
- * Three answers an admin gives ONCE for the whole portal — how cards look, how round their corners
- * are, and how much air sits between things — so that most portals never style a single card.
- *
- * ⚠️ `standard` is the portal exactly as it was before the kit existed. Every value here is a
- * DEFAULT, never an override: a card somebody styled by hand keeps its own inline values, which beat
- * the kit's stylesheet rules on specificity alone, so "keep hand-styled cards" needs no bookkeeping.
- *
- * ⚠️ Module state, set once per render by the builder — the same reason and the same safety
- * argument as the colour mode above. The looks and corners are painted by CSS classes on the theme
- * wrapper; SPACING cannot be, because the gaps between cards are computed inline (a flex share has
- * to subtract them), so the renderer asks `kitGap()` instead. */
-export type KitLook = 'standard' | 'flat' | 'outlined' | 'soft' | 'raised';
-export type KitCorners = 'standard' | 'sharp' | 'rounded' | 'round';
-export type KitSpacing = 'compact' | 'standard' | 'spacious';
-export interface PortalKit { look?: KitLook; corners?: KitCorners; spacing?: KitSpacing }
-
-let ACTIVE_KIT: PortalKit = {};
-export const setPortalKit = (k: PortalKit | undefined) => { ACTIVE_KIT = k ?? {}; };
-export const portalKit = (): PortalKit => ACTIVE_KIT;
-/** The gap between cards in a band, in px — 16 is the gap the page always had. */
-export const KIT_GAPS: Record<KitSpacing, number> = { compact: 10, standard: 16, spacious: 24 };
-export const kitGap = (): number => KIT_GAPS[ACTIVE_KIT.spacing ?? 'standard'];
-/** The classes the theme wrapper carries, so the stylesheet can answer the look and the corners. */
-export const kitClass = (k: PortalKit | undefined): string => {
-  const x = k ?? {};
-  return [
-    x.look && x.look !== 'standard' ? `portal-kit-look-${x.look}` : '',
-    x.corners && x.corners !== 'standard' ? `portal-kit-corners-${x.corners}` : '',
-    x.spacing && x.spacing !== 'standard' ? `portal-kit-space-${x.spacing}` : '',
-  ].filter(Boolean).join(' ');
-};
-
-/** The box keys a hand-styled card carries — what "make every card follow the page style" clears. */
-export const BOX_STYLE_KEYS = [
-  'bgFill', 'bg', 'dark:bg', 'borderMode', 'borderWidth', 'borderColor', 'dark:borderColor', 'borderStyle',
-  'radius', 'corners', 'elevation', 'shadowOn', 'shadowColor', 'shadowType', 'shadowPos',
-] as const;
-
 /** The key a value is stored under for one mode. Light is the bare key — see above. */
 export const modeKey = (mode: PortalColorMode, key: string) => (mode === 'dark' ? `dark:${key}` : key);
 
@@ -425,8 +385,7 @@ export function containerCss(styles: PortalStyles, id: string): React.CSSPropert
 
   const elevation = b('elevation');
   if (elevation === 'subtle') css.boxShadow = '0 1px 2px rgba(16,24,40,0.05)';
-  /* 'flat' takes a card's RESTING shadow off — the one its class draws — which is what the Style
-     popup's shadowless looks need; without it "Plain" would still float. */
+  /* 'flat' takes a card's RESTING shadow off — what the Style popup's shadowless looks need. */
   else if (elevation === 'flat') css.boxShadow = 'none';
   else if (elevation === 'raised') css.boxShadow = '0 4px 6px -2px rgba(16,24,40,0.06), 0 12px 20px -4px rgba(16,24,40,0.12)';
 

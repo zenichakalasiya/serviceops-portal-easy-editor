@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import {
-  ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, Eye, HelpCircle, MoreHorizontal, RotateCcw, TriangleAlert,
+  ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, Eye, HelpCircle, Keyboard, RotateCcw,
   Palette, PanelRight, Paintbrush, Pencil, Plus, Redo2, Undo2, X, LayoutPanelTop,
 } from 'lucide-react';
 import { PortalBannersPanel } from './PortalBannersPanel';
@@ -19,10 +19,10 @@ import { PortalBrandingPanel } from './PortalBrandingPanel';
 import { PRESETS, isRowAxis, presetOf } from './PortalSectionLayout';
 import type { PresetId } from './PortalSectionLayout';
 import { PortalThemePanel, DEFAULT_THEME, buttonOf, packOf, paletteOf, swatchesOf, faceOf, ThemeModeToggle } from './PortalThemePanel';
-import { BOX_STYLE_KEYS, kitClass, setPortalColorMode, setPortalKit } from './portalStyleResolver';
+import { setPortalColorMode } from './portalStyleResolver';
 import type { PortalTheme } from './PortalThemePanel';
 import { PortalElementPanel } from './PortalElementPanel';
-import { CanvasProvider } from './PortalCanvas';
+import { CanvasProvider, DesignQuickSections, hasDesignQuick } from './PortalCanvas';
 import { PortalShortcuts } from './PortalShortcuts';
 import { TipKeys } from './PortalShortcuts';
 import { chromeKeys } from './portalShortcutKeys';
@@ -41,7 +41,7 @@ import { PortalTourDock, DockGlyph } from './PortalTourDock';
 import { PortalWidgetDrawer } from './PortalWidgetDrawer';
 import { WIDGET_FOR_NODE, WIDGET_FOR_TYPE, specById, structureSpecId } from './portalWidgetSpec';
 import type { Cfg, WidgetSpec } from './portalWidgetSpec';
-import { BANNER_GROUPS, nodePath } from './portalPageModel';
+import { BANNER_GROUPS, nodePath, defaultPredefinedSections, PREDEFINED_ROW_BLOCK_ORDER } from './portalPageModel';
 import type { Box, BoxDir, CustomSection, NodeStyle, PlacedElement, PortalPageContent, PortalStyles } from './portalPageModel';
 import { PORTAL_ELEMENTS, PORTAL_EMPTY_WIDGETS, PORTAL_TEMPLATES, bannerLayout, bannerShape, isPredefinedElement, isPredefinedType } from './supportPortalData';
 import type { ShapeNode } from './supportPortalData';
@@ -51,6 +51,7 @@ import type { BannerNode } from './portalBannerLayout';
 import { IconPopover } from './PortalIconPicker';
 import type { IconChoice } from './PortalIconPicker';
 import type { PortalPage } from './supportPortalData';
+import { useShortcutContext } from './shortcutContext';
 
 /* Support Portal page builder.
  *
@@ -85,7 +86,9 @@ const RAIL: { key: RailKey; label: string; icon: (on: boolean) => ReactNode }[] 
   { key: 'theme', label: 'Theme', icon: () => <Paintbrush size={18} /> },
   { key: 'branding', label: 'Branding', icon: () => <Palette size={18} /> },
   /* Every banner from the layout gallery, built with this editor — horizontal and vertical. */
-  { key: 'banners', label: 'Banners', icon: () => <LayoutPanelTop size={18} /> },
+  /* ⚠️ Banners is HIDDEN from the rail (Zeni, 29 Sep 2026). The panel and its code stay — a banner's
+     layout is still changed from the banner's own Banner layout field — so restoring it is this line:
+     { key: 'banners', label: 'Banners', icon: () => <LayoutPanelTop size={18} /> }, */
   /* ⚠️ Settings is OFF the rail (25 Aug 2026). It used to sit below Branding on the reasoning that
      what a requester may DO on this portal is a property of this portal — but the rail is where you
      go while you are ARRANGING a page, and a nine-accordion permissions screen is not a thing you
@@ -196,6 +199,43 @@ export const LINK_CARD_ID = 'quick-link';
    that now reads it — safe only because a callback body runs after the component has, which is
    exactly the kind of ordering that breaks the day somebody adds it to a dependency array. */
 const GATHERING = ['x-action-card', 'x-kpi'];
+type SectionEntry = { afterId: string; section: CustomSection };
+
+/* ── Predefined cards and custom widgets never share a section (Zeni, 29 Sep 2026) ──────────────
+ * A drop that would put a predefined card (My Open Requests, My Assets…) into a section of custom
+ * widgets, or the other way round, is REFUSED with the reason — the same rule the pickers already
+ * follow when adding. The widget being moved is left out of the count, so moving a card within its
+ * own section is never refused. */
+function mixRefusal(list: SectionEntry[], boxId: string, type: string, movingId?: string): string | null {
+  const secId = sectionIdOfBox(boxId);
+  const sec = list.find((s) => s.section.id === secId)?.section;
+  if (!sec || sec.banner) return null;
+  const others = sectionElements(sec).filter((e) => e.id !== movingId);
+  if (!others.length) return null;
+  const targetPre = others.some((e) => isPredefinedType(e.type));
+  const movingPre = isPredefinedType(type);
+  if (targetPre === movingPre) return null;
+  return movingPre
+    ? 'Predefined cards only go into a section of predefined cards — drop it between two sections to give it its own'
+    : 'This section holds predefined cards — custom widgets go into a section of their own';
+}
+
+/* After a widget LEAVES a section: its emptied box goes (so the neighbours reflow), and a section left
+   with nothing in it is removed, so a move never leaves a blank gap on the page. A section that hosts
+   a built-in band or the banner is never removed this way. */
+function pruneSource(list: SectionEntry[], secId: string | null, boxId: string | null): SectionEntry[] {
+  if (!secId) return list;
+  return list.flatMap((s) => {
+    if (s.section.id !== secId) return [s];
+    let section = s.section;
+    if (boxId && parentOfBox(section.root, boxId)) section = removeBox(section, boxId);
+    if (!section.band && !section.banner && !sectionElements(section).length && !JSON.stringify(section.root).includes('"band"')) return [];
+    return [{ ...s, section }];
+  });
+}
+
+/** Catalogue id → display name, for seeding placed elements. */
+const ELEMENT_NAMES: Record<string, string> = Object.fromEntries(PORTAL_ELEMENTS.map((e) => [e.id, e.name]));
 
 const HERO_LAYOUT_KEYS = [
   'heading', 'sub', 'note', 'bgKind', 'bannerStyle', 'bannerColor', 'bannerImage',
@@ -220,6 +260,8 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
      while the rail was undefined, so Announcements and Contact Us silently rendered nowhere.
      A seed is a fact about how this session STARTED. Reading it twice is what let it change. */
   const [layout] = useState<'v1' | 'v2'>(() => (page.layout === 'v2' ? 'v2' : 'v1'));
+  /* The global Keyboard shortcuts panel opens focused on the builder while it is open. */
+  useShortcutContext('portal-builder');
   const isV2 = layout === 'v2';
 
   /* ⚠️ The template a page was STARTED from, resolved once, for the same reason `layout` is: these
@@ -237,6 +279,10 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
   /* Started from scratch rather than from a template or the default. Read in one place so the
      palette, the canvas and the empty state cannot disagree about whether the page has anything. */
   const isBlank = page.start === 'blank';
+  /* ⚠️ The DEFAULT page (v2, not blank, not from a template) draws its predefined cards as two real
+     SECTIONS rather than the old work band — see `defaultPredefinedSections`. Templates keep their
+     bands untouched, because a template's seed describes its own page. */
+  const predefinedRows = isV2 && !seed && !isBlank;
 
   const [width, setWidth] = useState(MIN_W);
   const [collapsed, setCollapsed] = useState(false);
@@ -248,9 +294,6 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
   /* The split CTA's menu. Closed by default — the chevron is an admission that a second option
      exists, not an invitation to read it every time. */
   const [pubMenu, setPubMenu] = useState(false);
-  /* The top bar's ⋯ menu, and the confirm that stands in front of Reset. */
-  const [moreMenu, setMoreMenu] = useState(false);
-  const [confirmReset, setConfirmReset] = useState(false);
   /* Which action the split button's main half is currently offering. Publish by default.
      ⚠️ The memory only ever runs in the SAFE direction here. The default is the live one, so the
      only thing remembering can do is leave the button on "Save as draft" — pressing it expecting to
@@ -837,17 +880,20 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
        ⚠️ Keyed on the SEED, not on this one template — every seeded template has the same claim to
        describing its own page, and Search Spotlight was carrying the gallery for the same reason. */
     if (page.start === 'blank' || seed) return [];
+    const pre = predefinedRows ? defaultPredefinedSections(ELEMENT_NAMES) : [];
+    const preEls = pre.reduce((n, x) => n + sectionElements(x.section).length, 0);
     const pool = PORTAL_ELEMENTS.filter((e) => !e.onPage && !e.hidden);
-    return pool.map((def, i) => {
-      const id = `sec-${i + 1}`;
+    return [...pre, ...pool.map((def, i) => {
+      /* Numbered past the predefined rows, so no id is minted twice. */
+      const id = `sec-${pre.length + i + 1}`;
       const section = sectionFromRows(id, [[1]]);
-      const inst: PlacedElement = { id: `el-${i + 1}`, type: def.id, name: def.name };
+      const inst: PlacedElement = { id: `el-${preEls + i + 1}`, type: def.id, name: def.name };
       /* ⚠️ An unsplit section IS its own single cell, so the element goes on the ROOT box and its
          parent is the section id. There is no separate column to put it in until something splits. */
       section.root.el = inst;
       registerPlaced(inst.id, inst.name, inst.type, id);
       return { afterId: 'records', section };
-    });
+    })];
   });
   sectionsRef.current = sections;
   /* ⚠️ Every box re-registers whenever the trees change. `nodeById` used to read a column straight
@@ -1155,7 +1201,7 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
   };
 
   const dropInColumn = useCallback((columnId: string, type: string) => {
-    const refused = bannerRefusal(columnId, type);
+    const refused = bannerRefusal(columnId, type) ?? mixRefusal(sectionsRef.current, columnId, type);
     if (refused) { toast.error(refused); return; }
     const sectionId = sectionIdOfBox(columnId);
     const el = makeElement(type, columnId);
@@ -1281,7 +1327,7 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
      the page's own and every edit behaves exactly as it did. */
   /* ⚠️ The seed wins over the layout default, and the layout default wins over v1. A template that
      says nothing about the bands falls through to exactly what it would have got. */
-  const [blockOrder, setBlockOrder] = useState<string[]>(() => seed?.blockOrder ?? (isV2 ? BLOCK_ORDER_V2 : DEFAULT_BLOCK_ORDER));
+  const [blockOrder, setBlockOrder] = useState<string[]>(() => seed?.blockOrder ?? (predefinedRows ? PREDEFINED_ROW_BLOCK_ORDER : isV2 ? BLOCK_ORDER_V2 : DEFAULT_BLOCK_ORDER));
   /* ⚠️ MERGED over the defaults, not replaced. A seed names only the rows it rearranges; `records`
      is still consulted by `rowOf` even when the band is not on the page, and a seed that replaced
      the map wholesale would leave those cards unable to move — with nothing on screen saying why. */
@@ -1315,7 +1361,13 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
        greyed out with a tick on a page carrying nothing. What a blank page HAS is whatever has since
        been dropped into it, which is the `types` set below. */
     if (!isBlank) {
-      Object.values(rowOrder).forEach((ids) => ids.forEach((id) => { if (!removed.includes(id)) nodes.add(id); }));
+      /* ⚠️ On the default page the predefined cards are PLACED elements (`predefinedRows`), so the work
+         and records lists describe a band that is not drawn — counting them would tick a card that has
+         been deleted. Only the Quick Actions list still describes a band on that page. */
+      Object.entries(rowOrder).forEach(([row, ids]) => {
+        if (predefinedRows && row !== 'quick') return;
+        ids.forEach((id) => { if (!removed.includes(id)) nodes.add(id); });
+      });
       content.quick.forEach((q) => nodes.add(q.id));
     }
     /* ⚠️ Top-level BANDS too, not just cards inside a row. Favourite Services and Most Used Services
@@ -1462,11 +1514,12 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
     setContent(DEFAULT_CONTENT);
     setStyles({});
     setWidgetCfg({});
-    setSections([]);
+    /* The default page resets to its two predefined-card sections, not to the old work band. */
+    setSections(predefinedRows ? defaultPredefinedSections(ELEMENT_NAMES) : []);
     setIcons({});
     setPlacedText({});
     setRowExtras({});
-    setBlockOrder(DEFAULT_BLOCK_ORDER);
+    setBlockOrder(predefinedRows ? PREDEFINED_ROW_BLOCK_ORDER : DEFAULT_BLOCK_ORDER);
     setRowOrder(DEFAULT_ROW_ORDER);
     setRemoved([]);
     setSelectedId(null);
@@ -2082,7 +2135,7 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
      overwriting — dropping onto a filled column used to be the one gesture that could destroy work,
      and a swap is what you meant by dragging one thing onto another anyway. */
   const relocateElement = useCallback((id: string, destCol: string) => {
-    const refusedMove = bannerRefusal(destCol, placedType(id) ?? '', id);
+    const refusedMove = bannerRefusal(destCol, placedType(id) ?? '', id) ?? mixRefusal(sectionsRef.current, destCol, placedType(id) ?? '', id);
     if (refusedMove) { toast.error(refusedMove); return; }
     const destSec = sectionIdOfBox(destCol);
     let occupant: PlacedElement | null = null;
@@ -2109,6 +2162,10 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
         sec.section.id === srcSec ? { ...sec, section: setBoxEl(sec.section, sourceCol!, occupant!) } : sec
       )));
       registerPlaced(occupant.id, occupant.name, occupant.type, sourceCol);
+    } else if (sourceCol) {
+      /* Nothing swapped back in: the emptied box goes, and an emptied section with it. */
+      const src = sourceCol as string;
+      setSections((prev) => pruneSource(prev, sectionIdOfBox(src), src));
     }
     select(id);
     toast.success(occupant ? 'Swapped places' : `${moving.name} moved`);
@@ -2133,7 +2190,8 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
     payload: { type: string } | { move: string },
     side: 'left' | 'right' | 'above' | 'below',
   ) => {
-    const refusedDrop = bannerRefusal(boxId, 'move' in payload ? placedType(payload.move) ?? '' : payload.type, 'move' in payload ? payload.move : undefined);
+    const refusedDrop = bannerRefusal(boxId, 'move' in payload ? placedType(payload.move) ?? '' : payload.type, 'move' in payload ? payload.move : undefined)
+      ?? mixRefusal(sectionsRef.current, boxId, 'move' in payload ? placedType(payload.move) ?? '' : payload.type, 'move' in payload ? payload.move : undefined);
     if (refusedDrop) { toast.error(refusedDrop); return; }
     const sectionId = sectionIdOfBox(boxId);
     const current = sectionsRef.current.find((s) => s.section.id === sectionId)?.section;
@@ -2167,13 +2225,15 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
     if ('move' in payload && !within) {
       const moved = detachElement(payload.move);
       if (!moved) return;
-      setSections((prev) => prev.map((s) => {
+      /* ⚠️ The source is pruned in the SAME write: its emptied box goes and, if nothing is left, the
+         whole section does — a move must not leave a blank gap behind it. */
+      setSections((prev) => pruneSource(prev.map((s) => {
         if (s.section.id !== sectionId) return s;
         const made = addNeighbourAt(s.section, boxId, dir, before);
         if (!made.id) return s;
         registerPlaced(moved.id, moved.name, moved.type, made.id);
         return { ...s, section: setBoxEl(made.section, made.id, moved) };
-      }));
+      }), srcSection, srcBox));
       select(moved.id);
       toast.success(dir === 'row' ? `${moved.name} moved into a new column` : `${moved.name} moved into a new row`);
       return;
@@ -3033,8 +3093,6 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
      being threaded through every one of them — a parameter that missed a single call site would
      leave one control quietly reading the wrong half of a colour pair. */
   setPortalColorMode(theme.mode);
-  /* The page-wide style kit — set here for the same reason as the mode: before anything reads it. */
-  setPortalKit(theme.kit);
   const themeSw = swatchesOf(theme);
   /* ⚠️ The accent is the PALETTE's accent slot, full stop. Deferring to the page's own `accent` prop
      for one palette meant picking ServiceOps-light silently produced a different colour from the one
@@ -3102,34 +3160,7 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
     </div>
   );
 
-  const themeClass = `portal-themed ${theme.mode === 'dark' ? 'portal-dark' : ''} ${kitClass(theme.kit)}`;
-
-  /* ── Blocks with a look of their own ─────────────────────────────────────────────────────────
-     The page style is a DEFAULT, so a card somebody styled by hand keeps its look (Zeni's call).
-     The Theme panel says how many there are and offers one click to hand them back to the page —
-     otherwise a kit change that 'does nothing' to three cards reads as a broken control.
-     ⚠️ Two stores, as everywhere: most blocks keep their box in STYLES, the action cards keep
-     their fill, border and corners in widget CONFIG (`fillCss`). */
-  const QUICK_BOX = ['fill', 'bg', 'borderWidth', 'borderColor', 'radius'] as const;
-  const ownLookIds = [
-    ...Object.entries(styles).filter(([, st]) => st && BOX_STYLE_KEYS.some((k) => (st as Record<string, unknown>)[k] !== undefined)).map(([id]) => id),
-    ...Object.entries(widgetCfg).filter(([id, c]) => /^quick-[a-z]+$/.test(id) && c && QUICK_BOX.some((k) => (c as Record<string, unknown>)[k] !== undefined)).map(([id]) => id),
-  ];
-  const ownLookCount = new Set(ownLookIds).size;
-  const followPageStyle = () => {
-    setStyles((prev) => Object.fromEntries(Object.entries(prev).map(([id, st]) => {
-      const next = { ...(st as Record<string, unknown>) };
-      BOX_STYLE_KEYS.forEach((k) => { delete next[k]; });
-      return [id, next];
-    })) as PortalStyles);
-    setWidgetCfg((prev) => Object.fromEntries(Object.entries(prev).map(([id, c]) => {
-      if (!/^quick-[a-z]+$/.test(id)) return [id, c];
-      const next = { ...(c as Record<string, unknown>) };
-      QUICK_BOX.forEach((k) => { delete next[k]; });
-      return [id, next];
-    })) as typeof prev);
-    toast.success('Every block now follows the page style');
-  };
+  const themeClass = `portal-themed ${theme.mode === 'dark' ? 'portal-dark' : ''}`;
 
   const iconBtn = 'flex size-8 items-center justify-center rounded text-[#64748B] transition-colors hover:bg-[#F3F4F6] hover:text-[#364658]';
   const divider = <span className="mx-1 h-5 w-px bg-[#E5E7EB]" />;
@@ -3255,39 +3286,13 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
               sheet existed. It exists, so there are two items and the menu earns its place.
               ⚠️ Both are HELP — one shows you the surface, the other shows you the keys — so they
               belong behind one glyph rather than taking two slots on a bar of eight. */}
-          <div className="relative">
-            <Tooltip delayDuration={0}><TooltipTrigger asChild>
-              <button onClick={() => setHelpMenu((v) => !v)} aria-label="Help" className={iconBtn}>
-                <HelpCircle size={17} />
-              </button>
-            </TooltipTrigger><TooltipContent><TipKeys label="Keyboard shortcuts" keys={chromeKeys('help')} /></TooltipContent></Tooltip>
-            {helpMenu && (
-              <>
-                <span className="fixed inset-0 z-[60]" onClick={() => setHelpMenu(false)} />
-                <div className="absolute right-0 top-[calc(100%+6px)] z-[61] w-[196px] rounded-lg border border-[#E5E7EB] bg-white p-1 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]">
-                  <button
-                    onClick={() => { setHelpMenu(false); setDock(false); setTour(true); }}
-                    className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12.5px] text-[#364658] transition-colors hover:bg-[#F5F7FA]"
-                  >Take the tour</button>
-                  {/* ⚠️ The dock's ONLY way back. It opens once, when the tour ends, and closing it
-                      is meant to be final — so without a row here the recap would be a surface an
-                      admin could lose permanently by pressing the ✕ they were offered. */}
-                  <button
-                    onClick={() => { setHelpMenu(false); setTour(false); setDock(true); }}
-                    className="flex w-full items-center rounded px-2.5 py-1.5 text-left text-[12.5px] text-[#364658] transition-colors hover:bg-[#F5F7FA]"
-                  >Editor basics</button>
-                  {/* The key is on the row, because a sheet that lists shortcuts should say its own. */}
-                  <button
-                    onClick={() => { setHelpMenu(false); setKeys(true); }}
-                    className="flex w-full items-center justify-between gap-2 rounded px-2.5 py-1.5 text-left text-[12.5px] text-[#364658] transition-colors hover:bg-[#F5F7FA]"
-                  >
-                    Keyboard shortcuts
-                    <kbd className="inline-flex h-[18px] min-w-[18px] items-center justify-center rounded border border-[#DFE5ED] bg-[#F8FAFC] px-1 text-[10px] font-semibold text-[#64748B]">?</kbd>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
+          {/* ⚠️ The ? is the TOUR, and only the tour (Zeni, 29 Sep 2026). The keyboard sheet and the Editor
+              basics video left its menu for the foot of the right rail, where they are always one click. */}
+          <Tooltip delayDuration={0}><TooltipTrigger asChild>
+            <button onClick={() => { setDock(false); setTour(true); }} aria-label="Take the tour" className={iconBtn}>
+              <HelpCircle size={17} />
+            </button>
+          </TooltipTrigger><TooltipContent>Take the tour</TooltipContent></Tooltip>
 
           {/* ── Light / dark, for the whole canvas ──────────────────────────────────────────────
               ⚠️ It used to sit on the THEME panel's title row, which put it three clicks away from
@@ -3306,64 +3311,14 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
 
           {divider}
 
-          {/* ⚠️ RESET LIVES IN A ⋯ MENU NOW, behind a confirm. It sat between the mode switch and
-              Preview, looking exactly like Preview — and one of them throws away nothing while the
-              other throws away the whole design. A destructive action one mis-click from the most
-              used button on the screen is the fault; moving it out of reach and asking first is the
-              fix, and the menu is where the next rarely-used page action can go too. */}
-          <div className="relative ml-1">
-            <Tooltip delayDuration={0}><TooltipTrigger asChild>
-              <button
-                onClick={() => setMoreMenu((v) => !v)}
-                aria-label="More page actions"
-                className={`inline-flex size-8 items-center justify-center rounded border border-[#DFE5ED] bg-white text-[#64748B] transition-colors hover:bg-[#F5F7FA] ${moreMenu ? 'bg-[#F5F7FA] text-[#364658]' : ''}`}
-              ><MoreHorizontal size={16} /></button>
-            </TooltipTrigger><TooltipContent>More page actions</TooltipContent></Tooltip>
-            {moreMenu && (
-              <>
-                <span className="fixed inset-0 z-[80]" onClick={() => setMoreMenu(false)} />
-                <div className="absolute right-0 top-[calc(100%+4px)] z-[81] w-[240px] rounded-lg border border-[#E5E7EB] bg-white p-1 shadow-[0_12px_24px_-6px_rgba(16,24,40,0.18)]">
-                  <button
-                    onClick={() => { setMoreMenu(false); setConfirmReset(true); }}
-                    className="flex w-full items-start gap-2.5 rounded px-2.5 py-2 text-left transition-colors hover:bg-[#FEF3F2]"
-                  >
-                    <RotateCcw size={15} className="mt-0.5 flex-shrink-0 text-[#D92D20]" />
-                    <span className="min-w-0">
-                      <span className="block text-[12.5px] font-medium text-[#B42318]">Reset page to default</span>
-                      <span className="block text-[11.5px] leading-[1.45] text-[#7B8FA5]">Removes every change on this page</span>
-                    </span>
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-          {confirmReset && (
-            <div className="fixed inset-0 z-[10050] flex items-center justify-center bg-black/40 p-6" onClick={() => setConfirmReset(false)}>
-              <div className="w-[420px] max-w-full rounded-xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
-                <div className="flex items-start gap-3 px-5 pb-2 pt-5">
-                  <span className="flex size-9 flex-shrink-0 items-center justify-center rounded-full bg-[#FEF3F2] text-[#D92D20]"><TriangleAlert size={18} /></span>
-                  <div className="min-w-0">
-                    <h2 className="text-[15px] font-semibold text-[#1E293B]">Reset this page to default?</h2>
-                    <p className="mt-1.5 text-[13px] leading-[1.6] text-[#64748B]">
-                      Every block, style, banner and setting on this page goes back to how it started. Your theme is kept.
-                      You can still undo this with <span className="font-medium text-[#364658]">Ctrl + Z</span>.
-                    </p>
-                  </div>
-                </div>
-                <div className="mt-3 flex justify-end gap-2 border-t border-[#e5e7eb] px-5 py-3">
-                  <button
-                    autoFocus
-                    onClick={() => setConfirmReset(false)}
-                    className="inline-flex h-8 items-center rounded border border-[#DFE5ED] bg-white px-3.5 text-[13px] font-medium text-[#364658] transition-colors hover:bg-[#F5F7FA]"
-                  >Keep my changes</button>
-                  <button
-                    onClick={() => { setConfirmReset(false); resetPage(); }}
-                    className="inline-flex h-8 items-center rounded bg-[#D92D20] px-3.5 text-[13px] font-medium text-white transition-colors hover:bg-[#B42318]"
-                  >Reset page</button>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* ⚠️ Bordered secondary, not a third plain text button. Reset throws away every edit on
+              the page, so it must not sit in the same visual class as Preview, which throws away
+              nothing — the weight is the warning. */}
+          <button
+            onClick={resetPage}
+            title="Put every block, style and setting back to the page's default"
+            className="ml-1 inline-flex h-8 items-center rounded border border-[#DFE5ED] bg-white px-3 text-[13px] font-medium text-[#364658] transition-colors hover:bg-[#F5F7FA]"
+          >Reset to default</button>
           {/* ⚠️ The same bordered secondary as Reset to default. It was the only bare-text control in a
               row of three, so the bar read as two buttons and a word rather than as a set of
               actions — and the least destructive of the three looked the least like something you
@@ -3586,7 +3541,7 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
                 />
               </div>
             ) : active === 'theme' ? (
-              <div className="flex min-h-0 flex-1 flex-col"><PortalThemePanel theme={theme} onChange={(patch) => setTheme((t) => ({ ...t, ...patch }))} ownLookCount={ownLookCount} onFollowPageStyle={followPageStyle} /></div>
+              <div className="flex min-h-0 flex-1 flex-col"><PortalThemePanel theme={theme} onChange={(patch) => setTheme((t) => ({ ...t, ...patch }))} /></div>
             ) : active === 'branding' ? (
               <div className="min-h-0 flex-1"><PortalBrandingPanel /></div>
             ) : active === 'banners' ? (
@@ -3622,6 +3577,12 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
                   onDelete={() => deleteNode(selectedId)}
                   onOpenSetting={(section, card) =>
                     toast.success(`This lives in Admin › ${section}${card ? ` › ${card}` : ''}`)}
+                  quickDesign={selectedId && hasDesignQuick(selectedId) ? (part: 'lead' | 'look') => (
+                    /* The toolbar's design controls, in the sidebar too (29 Sep 2026). Rendered inside the
+                       REAL canvas context — the sidebar itself sits outside it — so every control reads and
+                       writes exactly what the floating toolbar does. */
+                    <CanvasProvider value={{ ...canvasCtx, enabled: true }}><DesignQuickSections id={selectedId} part={part} /></CanvasProvider>
+                  ) : undefined}
                 />
               </div>
             ) : selectedId ? (
@@ -3637,6 +3598,12 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
                   setIcon={(id, c) => setIcons((p) => ({ ...p, [id]: c }))}
                   placedText={placedText}
                   setPlacedText={(id, patch) => setPlacedText((p) => ({ ...p, [id]: { ...p[id], ...patch } }))}
+                  quickDesign={selectedId && hasDesignQuick(selectedId) ? (part: 'lead' | 'look') => (
+                    /* The toolbar's design controls, in the sidebar too (29 Sep 2026). Rendered inside the
+                       REAL canvas context — the sidebar itself sits outside it — so every control reads and
+                       writes exactly what the floating toolbar does. */
+                    <CanvasProvider value={{ ...canvasCtx, enabled: true }}><DesignQuickSections id={selectedId} part={part} /></CanvasProvider>
+                  ) : undefined}
                 />
               </div>
             ) : (
@@ -3685,18 +3652,33 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
           {/* ⚠️ The closed dock, PARKED at the foot of the rail in the dock's own colour and glyph, so it
               reads as the same card folded away rather than as a fifth panel. Hidden while the dock is
               open — one thing, one place at a time. */}
-          {dockParked && !dock && (
-            <Tooltip delayDuration={0}><TooltipTrigger asChild>
-              <button
-                data-portal-dock="parked"
-                onClick={() => { setTour(false); setDock(true); }}
-                className="mt-auto flex w-[60px] flex-col items-center gap-1.5 rounded bg-[#1F2937] py-2 text-white shadow-[0_6px_14px_-6px_rgba(0,0,0,0.45)] transition-colors hover:bg-[#2B3645]"
-              >
-                <DockGlyph size={18} />
-                <span className="text-[11px] font-medium leading-none">Basics</span>
-              </button>
-            </TooltipTrigger><TooltipContent side="left">Editor basics</TooltipContent></Tooltip>
-          )}
+          {/* ── The rail's FOOT (Zeni, 29 Sep 2026): Keyboard shortcuts, and last the Editor basics video.
+              Both are always here — they used to live in the ? menu, and the video appeared on the rail
+              only after its card had been closed once. */}
+          {/* HIDDEN (Zeni, 5 Oct 2026): shortcuts live in the product's GLOBAL Keyboard shortcuts panel
+              (header keyboard icon, or `?`), so the rail no longer carries its own door to them.
+              Flip `false` to `true` to bring the button back. */}
+          {false && <Tooltip delayDuration={0}><TooltipTrigger asChild>
+            <button
+              onClick={() => setKeys((v) => !v)}
+              className={`mt-auto flex w-[60px] flex-col items-center gap-1.5 rounded py-2 transition-all ${keys ? 'bg-[#EBF5FF] text-[#3D8BD0]' : 'text-[#64748B] hover:bg-[#F5F7FA] hover:text-[#364658]'}`}
+            >
+              <Keyboard size={18} />
+              <span className="text-[11px] font-medium leading-none">Shortcuts</span>
+            </button>
+          </TooltipTrigger><TooltipContent side="left"><TipKeys label="Keyboard shortcuts" keys={chromeKeys('help')} /></TooltipContent></Tooltip>}
+          <Tooltip delayDuration={0}><TooltipTrigger asChild>
+            <button
+              data-portal-dock="parked"
+              onClick={() => { setTour(false); setDock((v) => !v); }}
+              /* ⚠️ A SOFT tint, not the dark block it was (Zeni, 29 Sep 2026): it is a help surface, not the
+                 loudest thing on the rail. 56px wide inside the 72px rail, so it has air on both sides. */
+              className={`mt-auto flex w-[56px] flex-col items-center gap-1.5 rounded py-2 transition-colors ${dock ? 'bg-[#EBF5FF] text-[#3D8BD0]' : 'bg-[#F1F5F9] text-[#475467] hover:bg-[#E8EDF3] hover:text-[#364658]'}`}
+            >
+              <DockGlyph size={18} />
+              <span className="text-[11px] font-medium leading-none">Basics</span>
+            </button>
+          </TooltipTrigger><TooltipContent side="left">Editor basics</TooltipContent></Tooltip>
         </div>
       </div>
 
@@ -3717,7 +3699,7 @@ export function SupportPortalBuilder({ page, accent, onRename, onPublish, onSave
       )}
       {/* ⚠️ OUTSIDE the tour's own condition: the dock is not a step of the tour, it is what is left
           once the tour has gone, and it stays up while the admin works. */}
-      {dock && !tour && <PortalTourDock onReplay={replayTour} onClose={() => { setDock(false); setDockParked(true); }} />}
+      {dock && !tour && <PortalTourDock onReplay={replayTour} onClose={() => setDock(false)} />}
       {layoutConfirm}
       {bannerStart && (
         <BannerStartDialog

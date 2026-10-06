@@ -9,7 +9,7 @@
  * `rounded` radius, the #3D8BD0 focus ring, `.app-select`. Nothing new was invented.
  */
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { createContext, useEffect, useId, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { MiniRange } from './PortalRange';
 import {
@@ -56,6 +56,21 @@ export function Field({ label, help, info, children, action, divider, tight }: {
     </div>
   );
 }
+
+/* ── The Design section's open/closed state, shared with the toolbar's sections ──────────────
+ *
+ * ⚠️ The toolbar's design controls in the sidebar (`DesignQuickSections`) are built OUTSIDE the drawer
+ * and handed in, so they kept their own open state — which is why Expand all / Collapse all never
+ * reached them. The drawer provides this; the sections read and toggle the drawer's own state through
+ * it, and REPORT which of them are showing so the Expand-all button counts exactly those.
+ * Keys are the group's name (`q:bg`, `q:edge` …); they default OPEN, stored as `shut:<key>`. */
+export interface DesignGroupsApi {
+  isOpen: (key: string) => boolean;
+  toggle: (key: string) => void;
+  /** Which groups a part drew — reported per part, since the lead and look halves render separately. */
+  report: (part: string, keys: string[]) => void;
+}
+export const DesignGroupsCtx = createContext<DesignGroupsApi | null>(null);
 
 /* ── Group — collapsible, INDEPENDENT (spec §2.1) ─────────────────────────
  *
@@ -827,6 +842,9 @@ const ZONE = {
 /* ⚠️ DERIVED from the slot's real rules, never typed per call site. A helper line that promises a
    limit the slot does not have is worse than no helper line — "max 5MB" under an input that
    rejects at 2MB teaches people to distrust every number on the screen. */
+/** The largest video a Video widget accepts. */
+const VIDEO_MAX_MB = 5;
+
 export function uploadHint(accept: string, maxMB: number, multiple = false, maxFiles?: number) {
   const types = accept.includes('image/*')
     ? 'PNG, JPG, SVG or WebP'
@@ -853,10 +871,15 @@ export function uploadHint(accept: string, maxMB: number, multiple = false, maxF
 export function VideoSource({ value, onChange }: { value?: string; onChange: (v: string) => void }) {
   const [linking, setLinking] = useState(false);
   const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
   const file = useRef<HTMLInputElement>(null);
 
   const take = (f?: File | null) => {
     if (!f) return;
+    /* What the hint promises is what the picker enforces: MP4, 5 MB at most. */
+    if (f.type !== 'video/mp4') { setError('Choose an MP4 video.'); return; }
+    if (f.size > VIDEO_MAX_MB * 1024 * 1024) { setError(`That video is over ${VIDEO_MAX_MB} MB — choose a smaller file.`); return; }
+    setError('');
     const fr = new FileReader();
     fr.onload = () => onChange(String(fr.result));
     fr.readAsDataURL(f);
@@ -894,39 +917,14 @@ export function VideoSource({ value, onChange }: { value?: string; onChange: (v:
         <PlayCircle size={22} />
       </span>
       <p className="mt-2.5 text-[13px] text-[#364658]">No video yet</p>
-      {linking ? (
-        <div className="mt-3 flex gap-1.5">
-          <input
-            autoFocus
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter' && draft.trim()) onChange(draft.trim()); if (e.key === 'Escape') setLinking(false); }}
-            placeholder="https://youtu.be/…"
-            className="h-8 min-w-0 flex-1 rounded border border-[#d1d5db] px-2.5 text-[13px] text-[#364658] outline-none focus:border-[#3D8BD0]"
-          />
-          <button
-            type="button"
-            disabled={!draft.trim()}
-            onClick={() => onChange(draft.trim())}
-            className="h-8 flex-shrink-0 rounded bg-[#3D8BD0] px-3 text-[12px] font-medium text-white disabled:cursor-not-allowed disabled:opacity-40"
-          >Add</button>
-        </div>
-      ) : (
-        <div className="mt-3 flex items-center justify-center gap-2">
-          <button
-            type="button"
-            onClick={() => file.current?.click()}
-            className="rounded border border-[#DFE5ED] px-3 py-1.5 text-[12px] font-medium text-[#364658] transition-colors hover:border-[#3D8BD0] hover:text-[#3D8BD0]"
-          >Select video</button>
-          <button
-            type="button"
-            onClick={() => setLinking(true)}
-            className="rounded border border-[#DFE5ED] px-3 py-1.5 text-[12px] font-medium text-[#364658] transition-colors hover:border-[#3D8BD0] hover:text-[#3D8BD0]"
-          >Upload link</button>
-        </div>
-      )}
-      <p className="mt-2 text-[11px] text-[#9CA3AF]">{uploadHint('video/*', 50)}, or a YouTube or Vimeo link</p>
-      <input ref={file} type="file" accept="video/*" className="hidden" onChange={(e) => { take(e.target.files?.[0]); e.target.value = ''; }} />
+      <button
+        type="button"
+        onClick={() => file.current?.click()}
+        className="mt-3 rounded border border-[#DFE5ED] px-3 py-1.5 text-[12px] font-medium text-[#364658] transition-colors hover:border-[#3D8BD0] hover:text-[#3D8BD0]"
+      >Upload video</button>
+      <p className="mt-2 text-[11px] text-[#9CA3AF]">Upload an MP4 video up to {VIDEO_MAX_MB} MB.</p>
+      {error && <p className="mt-1 text-[11px] text-[#DC2626]">{error}</p>}
+      <input ref={file} type="file" accept="video/mp4" className="hidden" onChange={(e) => { take(e.target.files?.[0]); e.target.value = ''; }} />
     </div>
   );
 }

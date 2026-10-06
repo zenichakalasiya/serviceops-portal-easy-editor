@@ -263,7 +263,7 @@ export const SLIDER_SPEC: WidgetSpec = {
      media, and the gap between slides is the standard carousel gap. Every retired key stays in
      `defaults`, so a page that stored one still resolves. */
   fields: [
-    { key: 'title', label: 'Title', control: 'text', group: 'Content', help: 'Optional — hidden when blank.' },
+    { key: 'title', label: 'Title', control: 'text', group: 'Content' },
     /* ⚠️ The group is CAROUSEL TYPE, not "Navigation" — nothing here navigates anything; it is the
        same question the Announcements card asks under "Card type", and the two widgets should ask it
        in the same words. The options say what is IN each carousel; the word "carousel" sits in the
@@ -282,8 +282,8 @@ export const SLIDER_SPEC: WidgetSpec = {
        In Image with data every slide brings its own, so a second image here would be a picture the
        carousel never shows. */
     { key: 'bgImage', label: 'Background image', control: 'upload', group: 'Carousel type', when: (c) => c.slideMode === 'data' },
-    { key: 'slideMaxWidth', label: 'Content max width', control: 'slider', tab: 'style', group: 'Slide', min: 30, max: 100, unit: '%' },
-    { key: 'slideOverlay', label: 'Text-over-media overlay', control: 'slider', tab: 'style', group: 'Slide', min: 0, max: 80, unit: '%' },
+    /* ⚠️ The Slide group (content max width, text-over-media overlay) left the sidebar (Zeni, 29 Sep
+       2026). Both keys stay in `defaults` and `SliderRender` still reads them. */
   ],
   /* ⚠️ NO P5 Media. Its seven keys — ratio, fit, focal, shape, mediaRadius, mediaOverlay and
      captionPos — are ALL inert on a slider: `SliderRender` hard-codes 16:9, `object-cover` and

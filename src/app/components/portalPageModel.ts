@@ -54,7 +54,7 @@ export const PORTAL_NODES: PortalNodeDef[] = [
   { id: 'rail', name: 'Sidebar', kind: 'rail', content: 'none' },
 
   // ── hero ──
-  { id: 'hero', name: 'Banner', kind: 'section', content: 'hero' },
+  { id: 'hero', name: 'Hero', kind: 'section', content: 'hero' },
   /* The banner's words are GROUPS, like Figma auto-layout frames: Group 1 holds the heading and the
      subheading; the Content group holds Group 1 and the search. Each group has a direction and a gap,
      and each element inside hugs its own width. */
@@ -153,6 +153,27 @@ export const registerBox = (id: string, parentDir: BoxDir, depth: number, parent
   BOXES[id] = { parent, parentDir, depth };
 };
 export const boxInfo = (id: string) => BOXES[id];
+
+/* ── A COLUMN aligns what it holds (Zeni, 29 Sep 2026) ──────────────────────────────────────────
+ * An added section's boxes (`sec-N`, `sec-N-bM`) store `align` (left / center / right / stretch) and
+ * `alignY` (start / center / end / stretch) in the style store, and the widgets inside FOLLOW them —
+ * the widget itself has no alignment. A nested box without its own value takes the nearest
+ * ancestor's, per axis, which is what lets one choice on a column reach every widget stacked in it.
+ * Default: top-left. */
+export const isSectionBox = (id: string): boolean => /^sec-\d+(-b\d+)?$/.test(id);
+export function colAlign(styles: Record<string, { align?: string; alignY?: string } | undefined>, id: string): { h?: string; v?: string } {
+  let h: string | undefined;
+  let v: string | undefined;
+  let cur: string | undefined = id;
+  for (let guard = 0; cur && guard < 12; guard++) {
+    const s = styles[cur];
+    if (h === undefined && s?.align) h = s.align;
+    if (v === undefined && s?.alignY) v = s.alignY;
+    if (h !== undefined && v !== undefined) break;
+    cur = BOXES[cur]?.parent ?? (/^sec-\d+-b\d+$/.test(cur) ? cur.replace(/-b\d+$/, '') : undefined);
+  }
+  return { h, v };
+}
 
 /** The element sitting inside this container, if one is. A column holds at most one. */
 export const placedIn = (parentId: string) => Object.keys(PLACED).find((k) => PLACED[k].parent === parentId) ?? null;
@@ -443,7 +464,7 @@ export interface NodeStyle {
   /** Sections only. 'page' MOVES the background behind every section (see §7.21). */
   bgScope?: 'section' | 'page';
   borderMode?: 'none' | 'line' | 'shadow';
-  elevation?: 'none' | 'subtle' | 'raised' | 'flat';
+  elevation?: 'none' | 'subtle' | 'raised';
   /* ── P2 Size & position ── */
   /** % of its column, 10–100. Distinct from `width`, which is the px a resize drag produced. */
   widthPct?: number;
@@ -758,6 +779,41 @@ export interface CustomSection {
  * is the hardest class of bug there is to report. Position lives in the tree; identity does not. */
 export function mintBox(section: { id: string; next: number }, dir: BoxDir, weight = 1): Box {
   return { id: `${section.id}-b${section.next++}`, dir, weight };
+}
+
+/* ── The default page's predefined cards, as two REAL sections (Zeni, 29 Sep 2026) ─────────────────
+ * They used to live in one built-in band split into a left region (Requests, Approvals, Assets, CIs)
+ * and a right rail (Announcements, Most Read, Contact Us), whose two regions carried move arrows of
+ * their own. They are now ordinary section trees, so they follow the SAME rules as every custom
+ * section: a section moves up / down, a column moves left / right inside its row, and widgets stacked
+ * in a column swap up / down.
+ *  · Row 1 — three equal columns: My Open Requests · Pending Approvals · Announcements.
+ *  · Row 2 — two columns at 2 : 1: My Assets over My CIs | Most Read Knowledge over Contact Us.
+ * The cards are PLACED predefined elements, drawn by the same renderer as the old band blocks.
+ * `startEl` is the first element number to use, so the ids never collide with anything seeded after. */
+export const PREDEFINED_ROW_BLOCK_ORDER = ['quick', 'favourites', 'services'];
+export function defaultPredefinedSections(names: Record<string, string>, startEl = 1): { afterId: string; section: CustomSection }[] {
+  let n = startEl;
+  const el = (type: string): PlacedElement => ({ id: `el-${n++}`, type, name: names[type] ?? type });
+  const leaf = (sec: CustomSection, type: string, weight = 1): Box => ({ ...mintBox(sec, 'column', weight), el: el(type) });
+
+  const a: CustomSection = { id: 'sec-1', root: { id: 'sec-1', dir: 'row', weight: 1 }, next: 1 };
+  a.root.children = [leaf(a, 'c-requests'), leaf(a, 'c-approvals'), leaf(a, 'c-announcements')];
+
+  const b: CustomSection = { id: 'sec-2', root: { id: 'sec-2', dir: 'row', weight: 1 }, next: 1 };
+  const left: Box = { ...mintBox(b, 'column', 2) };
+  const right: Box = { ...mintBox(b, 'column', 1) };
+  left.children = [leaf(b, 'c-assets'), leaf(b, 'c-cis')];
+  right.children = [leaf(b, 'c-knowledge'), leaf(b, 'c-contact')];
+  b.root.children = [left, right];
+
+  /* Every leaf registers its element under the box that holds it, so `nodeById` can describe it. */
+  const reg = (box: Box) => {
+    if (box.el) registerPlaced(box.el.id, box.el.name, box.el.type, box.id);
+    box.children?.forEach(reg);
+  };
+  reg(a.root); reg(b.root);
+  return [{ afterId: 'services', section: a }, { afterId: 'services', section: b }];
 }
 
 /** Depth cap, counted BELOW the section: Section > Column > Row > Column > Row. */
@@ -1290,6 +1346,72 @@ export const isServiceTile = (id: string): boolean => {
   return m[1] === 'favourites' || m[1] === 'services' || placedType(m[1]) === 'c-favourites' || placedType(m[1]) === 'c-services';
 };
 
+/* ── A data CARD aligns on the axis its template leaves free (Zeni, 29 Sep 2026) ──────────────────
+ * A card whose icon sits ABOVE its words (Icon top, and Text only, which stacks) has spare room
+ * ACROSS it, so it aligns Left / Centre / Right. A card whose icon sits BESIDE its words (Icon left,
+ * Icon right) has spare room DOWN it, so it aligns Top / Middle / Bottom. Offering both was offering
+ * an axis that had nothing to move.
+ * Covers the action cards (`quick-*`, a placed `x-action-card`) and the data tiles of Favourite
+ * Services, Most Used Services, My Assets and My CIs (`<card>-tile`). */
+export const isAlignCard = (id: string): boolean =>
+  /-tile$/.test(id) || /^quick-[a-z]+$/.test(id) || placedType(id) === 'x-action-card';
+/** The card template a card is wearing, read the way its renderer reads it. */
+export function cardTemplateOf(id: string, cfg?: (id: string) => Record<string, unknown>): string {
+  const tile = /^(.+)-tile$/.exec(id);
+  if (tile) {
+    const owner = tile[1];
+    const services = owner === 'favourites' || owner === 'services' || /^c-(favourites|services)$/.test(placedType(owner) ?? '');
+    return String(cfg?.(owner)?.cardTemplate ?? (services ? 'top' : 'left'));
+  }
+  const c = cfg?.(id) ?? {};
+  /* A PLACED card never inherits the Quick Actions row's template — it is not in that row. */
+  if (placedType(id) === 'x-action-card') return String(c.cardTemplate ?? (c.iconPos === 'top' ? 'top' : 'left'));
+  return String(c.cardTemplate ?? cfg?.('quick')?.cardTemplate ?? c.iconPos ?? 'left');
+}
+/** 'h' = Left / Centre / Right; 'v' = Top / Middle / Bottom.
+ *  ⚠️ ALWAYS 'h' now (Zeni, 29 Sep 2026): a data card aligns HORIZONTALLY in every template — the
+ *  icon and the words move together across the card. Vertical never had spare height to act on in a
+ *  row of equal cards. Kept as a function so the toolbar and the sidebar still ask one place. */
+export const cardAlignAxis = (_tpl: string): 'h' | 'v' => 'h';
+/** What the card shows when nobody has chosen — the arrangement the template already draws. */
+export const cardAlignDefault = (tpl: string, _id = ''): string => (tpl === 'top' ? 'center' : 'left');
+/** Class a card carries while it has an alignment of its own: it stops the text column GROWING (so
+ *  the icon + words move as one group in a side-by-side template) and makes nested lines follow
+ *  `--card-justify` (theme.css, `.card-align`). */
+export const cardAlignClass = (s: { align?: string } | undefined): string =>
+  s?.align && s.align !== 'stretch' ? 'card-align' : '';
+/** The card's own alignment as CSS on the card's flex box. Unset → nothing, so the template's own
+ *  arrangement stands. A column template (Icon top / stacked left) moves its items with
+ *  `align-items`; a row template (Icon left / right / Text only) moves the group with
+ *  `justify-content` — mirrored for Icon right, whose row runs reversed. */
+export function cardAlignCss(s: { align?: string; alignY?: string } | undefined, tpl: string): CSSProperties {
+  if (!s?.align || s.align === 'stretch') return {};
+  const a = s.align;
+  const flex = (v: string) => (v === 'left' ? 'flex-start' : v === 'right' ? 'flex-end' : 'center');
+  const stacked = tpl === 'top' || tpl === 'stackedLeft';
+  /* `flex-row-reverse` puts flex-start on the RIGHT, so the two ends swap for Icon right. */
+  const rowValue = tpl === 'right' ? (a === 'left' ? 'flex-end' : a === 'right' ? 'flex-start' : 'center') : flex(a);
+  return {
+    ...(stacked ? { alignItems: flex(a) } : { justifyContent: rowValue }),
+    textAlign: a === 'right' ? 'right' : a === 'center' ? 'center' : 'left',
+    ['--card-justify' as string]: flex(a),
+  } as CSSProperties;
+}
+
+/** How many data tiles a white card is ACTUALLY showing across, read off the canvas — the Layout
+ *  preset's "which one is lit" when nobody has chosen. The split service row, a narrow column and the
+ *  record cards' own default all decide it, so a guess from config lit "four across" over a 2 × 2. */
+export function measuredTileCols(id: string): number {
+  if (typeof document === 'undefined') return 0;
+  const tiles = [...document.querySelectorAll(`[data-node="${id}-tile"]`)] as HTMLElement[];
+  if (!tiles.length) return 0;
+  const top = Math.round(tiles[0].getBoundingClientRect().top);
+  return tiles.filter((t) => Math.round(t.getBoundingClientRect().top) === top).length;
+}
+/** Columns → the preset that draws them. */
+export const presetForCols = (n: number): 'stack' | 'grid' | 'three' | 'cols' =>
+  n === 1 ? 'stack' : n === 2 ? 'grid' : n === 3 ? 'three' : 'cols';
+
 /** The four-card main region and the three-card rail. */
 const WORK_REGIONS = new Set(['work-main', 'work-rail']);
 /** Widgets the product owns: their content is fixed, so there is nothing to add or swap. */
@@ -1386,7 +1508,14 @@ export function toolbarCaps(id: string): ToolbarCaps {
   if (isContactChild(id)) return { move: false, add: false, copy: false, drag: false, splitItem: true };
   /* The service tiles are ONE node shared by every tile, so the bar is alignment only — moving, copying
      or deleting "the tile" would mean every tile at once. */
-  if (isServiceTile(id)) return { move: false, add: false, copy: false, drag: false, remove: false };
+  /* ⚠️ NO ALIGNMENT on a predefined card or anything inside one (Zeni, 29 Sep 2026): the data in them is
+     laid out by the product, so an alignment control there either moved nothing or moved a tile out of
+     its grid cell. That covers the data tiles of every card (`-tile`), the Quick Actions cards and their
+     badges, the two service rows, the live cards and a placed predefined widget. */
+  /* ⚠️ …EXCEPT a data CARD's own content (Zeni, 29 Sep 2026): a tile and an action card align what is
+     INSIDE them, on the one axis their card template leaves free — see `cardAlignAxis`. The toolbar and
+     the sidebar both ask that helper which of the two to show; the caps only say "a card may align". */
+  if (isServiceTile(id) || /-tile$/.test(id)) return { move: false, add: false, copy: false, drag: false, remove: false };
   /* A banner ROW or COLUMN. It holds sections and lays them out: the two alignments are the whole of
      what it decides here.
      ⚠️ No Add, Copy, Delete or drag. A row is made by a preset or by dropping a section on an edge
@@ -1413,13 +1542,15 @@ export function toolbarCaps(id: string): ToolbarCaps {
      toolbar carried the very same action — so removing one and keeping the other would have left
      the row with a second door onto the card that is no longer offered. The `extLink` capability,
      its toolbar button and `addLinkCard` all stay, so restoring the pair is two flags. */
-  if (id === 'quick') return { add: false, copy: false, alignV: false, extLink: false };
+  /* ⚠️ No alignment on the ROW either — each card aligns its own content now. */
+  if (id === 'quick') return { add: false, copy: false, alignH: false, alignV: false, extLink: false };
   /* An action card. Its content belongs to the product, so Replace cannot be honoured; moving it
      along the row is the whole of what an admin decides here. */
+  if (/^quick-.+-icon$/.test(id)) return { add: false, alignH: false, alignV: false };
   if (/^quick-/.test(id)) return { add: false };
   /* Favourite / Most Used services — a full-width band: nothing to swap it with, nothing to copy it
      into, and no vertical alignment inside a block as tall as its own content. */
-  if (id === 'favourites' || id === 'services') return { add: false, copy: false, alignV: false };
+  if (id === 'favourites' || id === 'services') return { add: false, copy: false, alignH: false, alignV: false };
   /* The band holding every predefined widget. It arranges its two regions and nothing else. */
   if (id === 'work') return { add: false, copy: false, alignH: false, alignV: false };
   /* Those regions. They hold widgets in an order the admin sets by moving the WIDGETS — a region
@@ -1454,7 +1585,12 @@ export function toolbarCaps(id: string): ToolbarCaps {
      to prevent, and a second copy of a live card is not a second card, it is the same query drawn
      twice. The built-in blocks were already covered by `LIVE_WIDGETS` above; this is the same rule
      for the same widget dropped as an element. */
-  if (t && isPredefinedType(t)) return { copy: false };
+  if (t === 'x-action-card') return { copy: false };
+  if (t && isPredefinedType(t)) return { copy: false, alignH: false, alignV: false };
+  /* ⚠️ A widget inside an added section's COLUMN has no alignment of its own (Zeni, 29 Sep 2026): the
+     COLUMN aligns what it holds — one control for everything stacked in it — so the widget's toolbar
+     and sidebar carry none. See `colAlign`. The banner keeps its own per-widget placement. */
+  if (/^sec-\d+/.test(PLACED[id]?.parent ?? '')) return { alignH: false, alignV: false };
   /* ⚠️ `l-divider` joins them for the same reason and one of its own: a rule fills the column it is
      dropped into, so neither axis had a position to report — and its sidebar Alignment accordion
      was removed for exactly that, so leaving the toolbar pair would have kept a second copy of a

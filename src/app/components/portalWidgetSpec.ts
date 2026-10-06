@@ -427,7 +427,7 @@ export const WIDGET_SPECS: WidgetSpec[] = [
          beside it rendered nowhere and the panel looked exactly as it had before. The preset is kept
          by its control whatever group it sits in, so both move to the group the other card blocks
          already use, and Presets and the Gap they decide stay in one accordion. */
-      { key: '__tilePreset', label: 'Presets', control: 'tilePreset', tab: 'style', group: 'Columns' },
+      { key: '__tilePreset', label: 'Presets', control: 'tilePreset', tab: 'style', group: 'Layout' }, /* 'Layout', like the service rows (Zeni, 29 Sep 2026) — the preset survives DROP_GROUPS by its control. */
       /* ⚠️ Gap is not a control any more — see the note in `GapBands`. Every section keeps its resting gap. */
     ],
     packs: LIVE_CARD_PACKS, roles: LIST_CARD_ROLES,
@@ -448,7 +448,7 @@ export const WIDGET_SPECS: WidgetSpec[] = [
          beside it rendered nowhere and the panel looked exactly as it had before. The preset is kept
          by its control whatever group it sits in, so both move to the group the other card blocks
          already use, and Presets and the Gap they decide stay in one accordion. */
-      { key: '__tilePreset', label: 'Presets', control: 'tilePreset', tab: 'style', group: 'Columns' },
+      { key: '__tilePreset', label: 'Presets', control: 'tilePreset', tab: 'style', group: 'Layout' }, /* 'Layout', like the service rows (Zeni, 29 Sep 2026) — the preset survives DROP_GROUPS by its control. */
       /* ⚠️ Gap is not a control any more — see the note in `GapBands`. Every section keeps its resting gap. */
     ],
     packs: LIVE_CARD_PACKS, roles: LIST_CARD_ROLES,
@@ -506,10 +506,11 @@ export const WIDGET_SPECS: WidgetSpec[] = [
   {
     id: 'custom_card', name: 'Custom Card', group: 'Content', reuse: 'many', family: 'collection',
     fields: [
-      { key: 'layout', label: '', control: 'cardLayout', group: 'Card layout' },
       { key: 'title', label: 'Heading', control: 'text', group: 'Content' },
       { key: 'sub', label: 'Subtext', control: 'textarea', group: 'Content' },
       { key: 'image', label: 'Image', control: 'upload', group: 'Content', suggested: '800 × 600', when: (c) => String(c.layout ?? 'imageRight') !== 'links' && String(c.layout ?? 'imageRight') !== 'text' },
+      /* ⚠️ Card layout comes AFTER the Content group, below the Image (Zeni, 29 Sep 2026). */
+      { key: 'layout', label: '', control: 'cardLayout', group: 'Card layout' },
       /* The button is OPTIONAL everywhere it can appear — an empty label draws nothing. */
       { key: 'ctaLabel', label: 'Button label', control: 'text', group: 'Action', when: (c) => String(c.layout ?? 'imageRight') !== 'links', placeholder: 'Contact us' },
       { key: 'ctaUrl', label: 'Button link', control: 'text', group: 'Action', when: (c) => String(c.layout ?? 'imageRight') !== 'links' && !!c.ctaLabel, placeholder: 'https://' },
@@ -670,7 +671,10 @@ export const WIDGET_SPECS: WidgetSpec[] = [
          ⚠️ SHARED between the two service rows: the value is mirrored in `patchCfg`, so setting it
          on either sets it on both. Two grids of the same kind of thing, stacked one above the
          other, disagreeing about their own shape is a difference that means nothing. */
-      { key: 'cardTemplate', label: '', control: 'templates', group: 'Card templates' },
+      /* ⚠️ CARD TEMPLATES are on the inner TILES only (Zeni, 29 Sep 2026) — they describe one card, so they
+         belong to the card you select, not to the white card around the grid. The tiles write the same
+         `cardTemplate` key on this widget (`ownerOf` strips `-tile`), so nothing moved. LAYOUT is the
+         white card's: how many tiles sit across. */
       { key: '__tilePreset', label: 'Presets', control: 'tilePreset', tab: 'style', group: 'Layout' },
       /* ⚠️ The GAP between its tiles. It was taken out with the rest of this widget's grid controls and
          has come back on request: a row of cards whose spacing cannot be changed is the one band on the
@@ -721,7 +725,10 @@ export const WIDGET_SPECS: WidgetSpec[] = [
          ⚠️ SHARED between the two service rows: the value is mirrored in `patchCfg`, so setting it
          on either sets it on both. Two grids of the same kind of thing, stacked one above the
          other, disagreeing about their own shape is a difference that means nothing. */
-      { key: 'cardTemplate', label: '', control: 'templates', group: 'Card templates' },
+      /* ⚠️ CARD TEMPLATES are on the inner TILES only (Zeni, 29 Sep 2026) — they describe one card, so they
+         belong to the card you select, not to the white card around the grid. The tiles write the same
+         `cardTemplate` key on this widget (`ownerOf` strips `-tile`), so nothing moved. LAYOUT is the
+         white card's: how many tiles sit across. */
       { key: '__tilePreset', label: 'Presets', control: 'tilePreset', tab: 'style', group: 'Layout' },
       /* ⚠️ The GAP between its tiles — back on request. A row of cards whose spacing cannot be changed
          is the one band on the page that is not the admin's, and this row and Favourite Services were the
@@ -988,7 +995,6 @@ export const WIDGET_SPECS: WidgetSpec[] = [
        * on every page looks exactly as it did. The `designTab` gates went with the tab that set
        * them: with nothing writing that key, `(c.designTab ?? 'style') === 'style'` was a condition
        * that could only ever be true. */
-      { key: 'fullWidth', label: 'Full width', control: 'toggle', tab: 'style', group: 'Button' },
       { key: 'radius', label: 'Corner radius', control: 'slider', tab: 'style', group: 'Button', min: 0, max: 24 },
       { key: 'fillColor', label: 'Fill colour', control: 'color', tab: 'style', group: 'Button', when: (c) => c.style !== 'link' },
       { key: 'borderColor', label: 'Border colour', control: 'color', tab: 'style', group: 'Button', when: (c) => c.style === 'outline' },
@@ -1075,18 +1081,9 @@ export const WIDGET_SPECS: WidgetSpec[] = [
       /* ⚠️ These style the WHOLE block, and that is the division of labour: the toolbar styles what
          you selected, these style everything. Both are needed — the toolbar cannot express "this
          paragraph is 18px Poppins" without you selecting all of it first, every time you edit. */
-      { key: 'font', label: 'Font', control: 'select', tab: 'style', group: 'Text style',
-        options: ['Inherit from theme', 'Inter', 'Poppins', 'Roboto', 'Source Sans 3', 'Merriweather', 'IBM Plex Mono'] },
-      { key: 'weight', label: 'Font weight', control: 'select', tab: 'style', group: 'Text style',
-        options: ['Light', 'Normal', 'Medium', 'Semibold', 'Bold'] },
-      { key: 'size', label: 'Font size', control: 'sliderUnit', tab: 'style', group: 'Text style', min: 10, max: 48, unit: 'px' },
-      { key: 'color', label: 'Font colour', control: 'color', tab: 'style', group: 'Text style' },
-      { key: 'lineHeight', label: 'Line height', control: 'slider', tab: 'style', group: 'Text style', min: 100, max: 220 },
-      { key: 'letterSpacing', label: 'Letter spacing', control: 'slider', tab: 'style', group: 'Text style', min: -2, max: 8 },
-      {
-        key: 'textCols', label: 'Column count', control: 'segmented', tab: 'style', group: 'Text style',
-        options: [{ value: '1', label: '1' }, { value: '2', label: '2' }],
-      },
+      /* ⚠️ The Text style group is GONE from the sidebar (Zeni, 29 Sep 2026): font, weight, size, colour,
+         line height, letter spacing and columns. The words are styled on the canvas's text toolbar.
+         Every key stays in `defaults` and is still read, so no text on any page changes. */
       {
         key: 'textAlign', label: 'Alignment', control: 'segmented', tab: 'style', group: 'Alignment',
         options: [{ value: 'left', label: 'Left' }, { value: 'center', label: 'Centre' }, { value: 'right', label: 'Right' }, { value: 'justify', label: 'Justify' }],
@@ -1161,9 +1158,8 @@ export const WIDGET_SPECS: WidgetSpec[] = [
          value the page already answers by being looked at. The key stays in `defaults` and the
          renderer still reads it as the floor, so no card on any page changed. */
       { key: 'filter', label: 'Filter', control: 'recordFilter', group: 'Content' },
-      /* How the number and its title sit together — on the KPI tab only. Where the pair sits inside the
-         card is the floating toolbar's H/V alignment. */
-      { key: 'kpiLayout', label: '', control: 'kpiLayout', group: 'Card templates', when: (c) => c.display === 'kpi' },
+      /* ⚠️ The KPI display has NO Card templates (Zeni, 29 Sep 2026) — Alignment is its one layout
+         control. The `kpiLayout` key is still read by the renderer, so a KPI that stored one keeps it. */
     ],
     /* The same Style the trimmed live cards keep. ⚠️ No P8: you asked for the empty state My CIs
        has, which is the product's — not one an admin writes per card. */
@@ -1224,7 +1220,8 @@ export const WIDGET_SPECS: WidgetSpec[] = [
          Image element with no image is not a variant of an image, it is a Text element under the
          wrong name, with alt text and a crop still on screen describing nothing. Anyone who wants
          only words already has the Text element. */
-      { key: 'template', label: 'Card templates', control: 'templates', group: 'Content', options: ['left', 'top', 'right'] },
+      { key: 'template', label: 'Card templates', control: 'templates', group: 'Content', options: ['left', 'top', 'right'],
+        when: (c) => String(c.caption ?? '').replace(/<[^>]*>/g, '').replace(/&nbsp;/g, ' ').trim() !== '' },
       /* ⚠️ Link is the image's ACTION, not its content. Where a click goes is neither what the
          element shows nor how it looks — the same reason the action cards keep their destination in
          a section of its own rather than buried among titles. */
