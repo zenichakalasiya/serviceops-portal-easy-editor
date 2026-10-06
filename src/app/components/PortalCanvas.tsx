@@ -3059,6 +3059,14 @@ export const BANNER_SIDE_WIDGETS: { type: string; label: string }[] = [
   { type: 'b-text', label: 'Text' },
 ];
 
+/* The banner's corners: a band has no "page" corner to fall back to, so Sharp is 0. */
+const BANNER_CORNERS: { r: number; label: string; glyph: number }[] = [
+  { r: 0, label: 'Sharp', glyph: 0 },
+  { r: 8, label: 'Slight', glyph: 3 },
+  { r: 16, label: 'Rounded', glyph: 6 },
+  { r: 28, label: 'Round', glyph: 10 },
+];
+
 function BannerToolbar() {
   const { cfg, setCfg, deleteNode, heroTree, setBannerSections } = useCanvas();
   const hero = cfg?.('hero') ?? {};
@@ -3104,6 +3112,14 @@ function BannerToolbar() {
     },
   });
   const fileRef = useRef<HTMLInputElement>(null);
+  const stylePopRef = useRef<HTMLDivElement>(null);
+  const edgeRef = useRef<HTMLButtonElement>(null);
+  const [edgeAt, setEdgeAt] = useState<DOMRect | null>(null);
+  const edgeW = Number(hero.bannerBorderWidth ?? 0);
+  const edgeR = Number(hero.bannerRadius ?? 0);
+  const edgePair = colorPair(hero as Record<string, unknown>, 'bannerBorderColor', '#E5E7EB', (p) => setCfg?.('hero', p));
+  const edgeColor = shownOf(edgePair);
+  useEffect(() => { if (!bg) setEdgeAt(null); }, [bg]);
   const { tip, setTip, readTip } = useToolbarTip();
   const alignH = String(hero.contentAlign ?? 'center');
   const h = alignH.includes('left') ? 'left' : alignH.includes('right') ? 'right' : 'center';
@@ -3177,9 +3193,12 @@ function BannerToolbar() {
           colour — `BannerFillEditor` stamps `bgKind: 'color'` on every write of its own, and the file
           picker stamps `'image'` — so a tab you opened to see what was there cannot repaint the band. */}
       <div className="relative">
+        {/* ⚠️ ONE labelled Style button, like every other widget's bar — it was a paint bucket, a
+            border square and a corner glyph, the old three-icon look the rest of the builder left.
+            The popup holds the banner's whole look: Background (picture or colour), Border, Corners. */}
         <button
-          className={bg ? btnOn : btn}
-          data-tip="Banner background — a picture or a colour"
+          className={`${textBtn} ${bg ? 'bg-[var(--bar-on-bg,#EBF5FF)] text-[var(--bar-on-ink,#3D8BD0)]' : ''}`}
+          data-tip="Style — how this banner looks"
           onClick={() => {
             setAxis(null); setLayout(false);
             if (!bg) setBgTab(hero.bgKind === 'color' ? 'color' : 'image');
@@ -3188,17 +3207,15 @@ function BannerToolbar() {
             if (!bg) setBgRow(0);
             setBg((x) => !x);
           }}
-        ><PaintBucket size={15} /></button>
+        ><Paintbrush size={14} />Style<ChevronDown size={12} className="text-[#9CA3AF]" /></button>
         {bg && (
           <>
             <span className="fixed inset-0 z-[60]" onClick={() => setBg(false)} />
-            {/* ⚠️ 224px — the colour picker’s own width, so the popup and the picker it opens read as one size.
-                The editors take `dense` (28px controls, a thinner stop bar); the panel keeps the full size.
-                The colour picker is portalled to the body, so this scroll box cannot clip it. */}
-            <div className="absolute left-1/2 top-[calc(100%+6px)] z-[61] max-h-[min(70vh,520px)] w-[224px] -translate-x-1/2 overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-2.5 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]">
-              {/* ⚠️ The pill-on-a-track the product uses for LABELLED tabs, deliberately not the bordered
-                  strip `BannerFillEditor`'s Solid/Gradient uses one level down — two identical strips
-                  stacked would read as one control that had grown a second row. */}
+            <div ref={stylePopRef} className="absolute left-0 top-[calc(100%+6px)] z-[61] max-h-[min(70vh,560px)] w-[300px] overflow-y-auto rounded-lg border border-[#E5E7EB] bg-white p-3 shadow-[0_12px_16px_-4px_rgba(16,24,40,0.10),0_4px_6px_-2px_rgba(16,24,40,0.06)]">
+              <p className="mb-2 text-[12.5px] font-semibold text-[#1E293B]">Banner style</p>
+              <p className="mb-1.5 text-[11.5px] font-medium text-[#364658]">Background</p>
+              {/* ⚠️ The pill-on-a-track the product uses for LABELLED tabs, deliberately not the
+                  chip strip `BannerFillEditor`'s Solid/Gradient uses one level down. */}
               <div className="pill-track mb-2">
                 {([['image', 'Image'], ['color', 'Colour']] as const).map(([k, label]) => (
                   <button
@@ -3265,15 +3282,53 @@ function BannerToolbar() {
               ) : (
                 <BannerFillEditor dense cfg={hero} setCfg={(patch) => setCfg?.('hero', patch)} />
               )}
+              {/* ── Border + Corners, in the Style popup's own language (the card Style popup's Custom
+                  section): a weight slider with its colour pill on one row, then corners as glyphs. The
+                  banner keeps its OWN keys (`bannerBorder*`, `bannerRadius`) — it paints them on the band. */}
+              <div className="-mx-3 mt-3 border-t border-[#EEF1F5] px-3 pt-3">
+                <div className="flex h-8 items-center gap-2.5">
+                  <span className="w-[56px] flex-shrink-0 text-[11.5px] font-medium text-[#364658]">Border</span>
+                  <MiniRange min={0} max={8} value={edgeW} label="Border weight" onChange={(v) => setCfg?.('hero', { bannerBorderWidth: v })} />
+                  <span className="w-7 flex-shrink-0 text-right text-[11px] tabular-nums text-[#64748B]">{edgeW}px</span>
+                  <button
+                    ref={edgeRef}
+                    aria-label="Border colour"
+                    title="Border colour"
+                    disabled={edgeW === 0}
+                    onClick={() => setEdgeAt(edgeAt ? null : edgeRef.current!.getBoundingClientRect())}
+                    className={`size-[22px] flex-shrink-0 rounded-full border border-black/10 transition-shadow hover:ring-2 hover:ring-[#3D8BD0]/25 disabled:cursor-not-allowed disabled:opacity-40 ${edgeAt ? 'ring-2 ring-[#3D8BD0]/40' : ''}`}
+                    style={{ background: edgeColor }}
+                  />
+                </div>
+                <div className="mb-1.5 mt-3 flex items-baseline justify-between">
+                  <span className="text-[11.5px] font-medium text-[#364658]">Corners</span>
+                  <span className="text-[11px] text-[#9CA3AF]">{BANNER_CORNERS.find((c) => c.r === edgeR)?.label ?? `${edgeR}px`}</span>
+                </div>
+                <div className="pill-track">
+                  {BANNER_CORNERS.map((c) => (
+                    <button key={c.r} aria-pressed={edgeR === c.r} title={c.label}
+                      onClick={() => setCfg?.('hero', { bannerRadius: c.r })}
+                      className="flex flex-1 items-center justify-center rounded py-1 text-[#64748B]">
+                      <CornerGlyph r={c.glyph} />
+                    </button>
+                  ))}
+                </div>
+              </div>
             </div>
+            {edgeAt && (
+              <PortalColorPicker
+                value={edgeColor}
+                pair={edgePair}
+                anchor={edgeAt}
+                beside={stylePopRef.current?.getBoundingClientRect()}
+                onChange={(v) => setCfg?.('hero', { bannerBorderColor: v })}
+                onClose={() => setEdgeAt(null)}
+              />
+            )}
           </>
         )}
       </div>
       <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { onFile(e.target.files?.[0]); e.target.value = ''; }} />
-      {/* ⚠️ The banner's OWN border and corners, beside its colour — the same three questions every
-          other block answers on its bar, in the same order. They were a "Corners & border" group in
-          the panel, which is the copy you are not looking at while you are looking at the banner. */}
-      <BannerEdgeMenus />
       <Rule />
       <button className="flex size-7 items-center justify-center rounded text-[#EF4444] transition-colors hover:bg-[#FEF3F2]" data-tip="Delete the banner" onClick={() => deleteNode('hero')}><Trash2 size={14} /></button>
     </div>
